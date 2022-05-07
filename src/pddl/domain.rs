@@ -32,7 +32,10 @@ impl fmt::Display for Domain<'_> {
 impl FromStr for Domain<'_> {
     type Err = DomainParseError;
     fn from_str(pddl: &str) -> Result<Self, Self::Err> {
-        Lexer::tokenize(pddl);
+        let tokens = Lexer::tokenize(pddl);
+        for token in tokens {
+            println!("{}", token);
+        }
         let actions = Vec::<Action>::new();
         let predicates = Vec::<Predicate>::new();
         
