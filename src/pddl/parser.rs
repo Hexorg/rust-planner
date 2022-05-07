@@ -73,17 +73,19 @@ impl Lexer {
                                 word.push(c);
                             }
                         if let Some(Token::Literal(nc, nl, word)) = tokens.last() {
+                            let old_col = *nc;
+                            let old_line = *nl;
                             match word.to_lowercase().as_str() {
-                                "domain" => { tokens.pop(); tokens.push(Token::Domain((*nc).clone(), (*nl).clone())); },
-                                "define" => { tokens.pop(); tokens.push(Token::Define((*nc).clone(), (*nl).clone())); },
-                                ":action" => { tokens.pop(); tokens.push(Token::Action((*nc).clone(), (*nl).clone())); },
-                                ":effect" => { tokens.pop(); tokens.push(Token::Effect((*nc).clone(), (*nl).clone())); },
-                                ":parameters" => { tokens.pop(); tokens.push(Token::Parameters((*nc).clone(), (*nl).clone())); },
-                                ":precondition" => { tokens.pop(); tokens.push(Token::Precondition((*nc).clone(), (*nl).clone())); },
-                                ":predicates" => { tokens.pop(); tokens.push(Token::Predicates((*nc).clone(), (*nl).clone())); },
-                                "and" => { tokens.pop(); tokens.push(Token::And((*nc).clone(), (*nl).clone())); },
-                                "or" => { tokens.pop(); tokens.push(Token::Or((*nc).clone(), (*nl).clone())); },
-                                "not" => { tokens.pop(); tokens.push(Token::Not((*nc).clone(), (*nl).clone())); }
+                                "domain" => { tokens.pop(); tokens.push(Token::Domain(old_col, old_line)); },
+                                "define" => { tokens.pop(); tokens.push(Token::Define(old_col, old_line)); },
+                                ":action" => { tokens.pop(); tokens.push(Token::Action(old_col, old_line)); },
+                                ":effect" => { tokens.pop(); tokens.push(Token::Effect(old_col, old_line)); },
+                                ":parameters" => { tokens.pop(); tokens.push(Token::Parameters(old_col, old_line)); },
+                                ":precondition" => { tokens.pop(); tokens.push(Token::Precondition(old_col, old_line)); },
+                                ":predicates" => { tokens.pop(); tokens.push(Token::Predicates(old_col, old_line)); },
+                                "and" => { tokens.pop(); tokens.push(Token::And(old_col, old_line)); },
+                                "or" => { tokens.pop(); tokens.push(Token::Or(old_col, old_line)); },
+                                "not" => { tokens.pop(); tokens.push(Token::Not(old_col, old_line)); }
                                 _ => ()
                             }
                         }
