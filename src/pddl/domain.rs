@@ -33,6 +33,7 @@ impl FromStr for Domain<'_> {
     type Err = DomainParseError;
     fn from_str(pddl: &str) -> Result<Self, Self::Err> {
         let tokens = Lexer::tokenize(pddl);
+        println!("Tokens:");
         for token in tokens {
             println!("{}", token);
         }
