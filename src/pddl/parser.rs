@@ -2,6 +2,18 @@ use std::fmt;
 
 pub struct Lexer { }
 
+pub struct Parser<'a> { 
+    idx: usize,
+    tokens: &'a Vec<Token>,
+}
+
+pub struct ParserError{
+    col: usize,
+    line: usize,
+    message: String,
+}
+
+#[derive(PartialEq, Eq)]
 pub enum Token {
     LeftParen(usize, usize),
     RightParen(usize, usize),
@@ -47,19 +59,6 @@ impl Lexer {
         let mut col:usize = 0;
         let mut line:usize = 0;
 
-        // let add_wide_token = || {
-        //     if let Some(token) = wide_token {
-        //         if let Token::LITERAL(word) = token {
-        //             match word.to_lowercase().as_str() {
-        //                 "domain" => tokens.push(Token::DOMAIN()),
-        //                 _ => (),
-        //             }
-        //         } else {
-        //             tokens.push(token);
-        //         }
-        //         wide_token = None;
-        //     }
-        // };
         for c in pddl.chars() {
             col += 1;
             match c {
@@ -96,5 +95,42 @@ impl Lexer {
             
         }
         return tokens;
+    }
+}
+
+impl Parser<'_> {
+    fn expect(&mut self, token:Token) -> Result<(), ParserError> {
+        if token == self.tokens[self.idx] {
+            Ok(())
+        } else {
+            Err(match self.tokens[self.idx] {
+                Token::LeftParen(col, line) |
+                Token::RightParen(col, line) |
+                Token::Define(col, line) |
+                Token::Domain(col, line) |
+                Token::Action(col, line) |
+                Token::Predicates(col, line) |
+                Token::Effect(col, line) |
+                Token::Parameters(col, line) |
+                Token::Precondition(col, line) |
+                Token::And(col, line) |
+                Token::Or(col, line) |
+                Token::Not(col, line) |
+                Token::Literal(col, line, _) |
+                Token::Variable(col, line, _)  => ParserError{col, line, message:format!("Expected {} got {}", token, self.tokens[self.idx])}
+            })
+        }
+    }
+
+    fn expression(&mut self) {
+        match self.tokens[self.idx] {
+            Token::LeftParen(_, _) => {self.idx += 1; self.expression(); self.expect(Token::RightParen(0,0)).expect(msg); },
+            _ => (),
+        }
+    }
+    pub fn parse(tokens: &'static Vec<Token>) {
+        let mut parser = Parser{idx:0, tokens};
+        parser.expression();
+
     }
 }

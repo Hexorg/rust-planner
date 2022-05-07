@@ -34,7 +34,7 @@ impl FromStr for Domain<'_> {
     fn from_str(pddl: &str) -> Result<Self, Self::Err> {
         let tokens = Lexer::tokenize(pddl);
         println!("Tokens:");
-        for token in tokens {
+        for (idx, token) in tokens.iter().enumerate() {
             println!("{}", token);
         }
         let actions = Vec::<Action>::new();
