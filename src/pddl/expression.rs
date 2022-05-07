@@ -7,7 +7,7 @@ pub enum Expression<'a> {
     And(Vec<Expression<'a>>),
     Or(Vec<Expression<'a>>),
     Not(Box<Expression<'a>>),
-    Value(&'a Predicate, Vec<usize>)
+    Predicate(&'a Predicate, Vec<usize>)
 }
 
 #[macro_export]
@@ -50,7 +50,7 @@ impl fmt::Display for Expression<'_> {
             Expression::Or(v) => { write!(f, "(or ")?; v.iter().fold(Ok(()), |_,item| write!(f, "{} ", item))?; write!(f, ")")},
             Expression::And(v) => { write!(f, "(and ")?; v.iter().fold(Ok(()), |_,item| write!(f, "{} ", item))?; write!(f, ")")},
             Expression::Not(item) => write!(f, "(not {})", item),
-            Expression::Value(p, v) => write!(f, "({} {})", p.name, build_var_string(v, None))
+            Expression::Predicate(p, v) => write!(f, "({} {})", p.name, build_var_string(v, None))
         }
     }
 }
@@ -63,7 +63,7 @@ impl<'a> Expression<'a> {
                 Expression::Or(v) |
                 Expression::And(v) => v.iter().for_each(|e| rec_count(e, set)),
                 Expression::Not(e) => rec_count(e, set),
-                Expression::Value(_,v) => set.extend(v),
+                Expression::Predicate(_,v) => set.extend(v),
             }
         }
         rec_count(&self, &mut variable_set);

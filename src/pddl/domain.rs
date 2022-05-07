@@ -1,10 +1,22 @@
 use std::fmt;
+use std::str::FromStr;
 use super::action::Action;
 use super::predicate::Predicate;
+use super::parser::Lexer;
 
 pub struct Domain<'a> {
     pub predicates: Vec<Predicate>,
     pub actions: Vec<Action<'a>>
+}
+
+
+
+pub struct DomainParseError(());
+
+impl fmt::Debug for DomainParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "DomainParseError")
+    }
 }
 
 impl fmt::Display for Domain<'_> {
@@ -17,16 +29,13 @@ impl fmt::Display for Domain<'_> {
     }
 }
 
-impl<'a> Domain<'a> {
-    pub fn new() -> Domain<'a> {
-        Domain{
-            predicates: Vec::new(),
-            actions: Vec::new()
-        }
-    }
-    pub fn new_predicate(&mut self, name: &str, variable_count: usize) -> usize {
-        let new_index = self.predicates.len();
-        self.predicates.push(Predicate::new(name, variable_count));
-        return new_index;
+impl FromStr for Domain<'_> {
+    type Err = DomainParseError;
+    fn from_str(pddl: &str) -> Result<Self, Self::Err> {
+        Lexer::tokenize(pddl);
+        let actions = Vec::<Action>::new();
+        let predicates = Vec::<Predicate>::new();
+        
+        Ok(Domain{actions, predicates})
     }
 }
