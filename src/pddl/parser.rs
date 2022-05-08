@@ -1,5 +1,5 @@
 use std::fmt;
-use super::predicate::Predicate;
+use super::domain::{Expression, Action, Predicate, Domain};
 
 pub struct Lexer { }
 
@@ -141,53 +141,109 @@ macro_rules! expect_get {
 
 impl Parser<'_> {
 
+    fn expression(&mut self) -> Result<Expression, ParserError> {
+        expect!(self, TokenType::LeftParen)?;
+        let expr = match &self.tokens[self.idx].token_type {
+            TokenType::And => { let mut operands = Vec::<Expression>::new();
+                self.idx += 1;
+                while let Ok(subexp) = self.expression() {
+                    operands.push(subexp);
+                }
+                Expression::And(operands)
+            },
+            TokenType::Or => { let mut operands = Vec::<Expression>::new();
+                self.idx += 1;
+                while let Ok(subexp) = self.expression() {
+                    operands.push(subexp);
+                }
+                Expression::Or(operands)
+            },
+            TokenType::Not => {self.idx += 1; Expression::Not(Box::new(self.expression()?))},
+            TokenType::Literal(name) => { 
+                self.idx += 1;
+                let mut vars = Vec::<String>::new();
+                while let TokenType::Variable(var) = &self.tokens[self.idx].token_type {
+                    self.idx += 1;
+                    vars.push(var.clone());
+                }
+                Expression::Predicate(name.clone(), vars)
+                
+            },
+            TokenType::RightParen => {self.idx += 1; Expression::None},
+            _ => return Err(ParserError{col:self.tokens[self.idx].col, line:self.tokens[self.idx].col, message:"Expected and, or, not, or ')'".to_string()})
+        };
+        expect!(self, TokenType::RightParen)?;
+        Ok(expr)
+    }
+
+    fn actions(&mut self) -> Result<Vec<Action>, ParserError> {
+        let mut r = Vec::<Action>::new();
+        while let TokenType::LeftParen = self.tokens[self.idx].token_type {
+            expect!(self, TokenType::LeftParen)?;
+            expect!(self, TokenType::Action)?;
+            let name = expect_get!(self, TokenType::Literal(name), name)?.clone();
+            expect!(self, TokenType::Parameters)?;
+            expect!(self, TokenType::LeftParen)?;
+            let mut parameters = Vec::<String>::new();
+            while let TokenType::Variable(name) = &self.tokens[self.idx].token_type {
+                self.idx += 1;
+                parameters.push(name.clone());
+            }
+            expect!(self, TokenType::RightParen)?;
+            expect!(self, TokenType::Precondition)?;
+            let precondition = self.expression()?;
+            expect!(self, TokenType::Effect)?;
+            let effect = self.expression()?;
+            expect!(self, TokenType::RightParen)?;
+            r.push(Action{name, parameters, effect, precondition});
+        }
+        Ok(r)
+    }
+
     fn predicates(&mut self) -> Result<Vec<Predicate>, ParserError> {
         expect!(self, TokenType::LeftParen)?;
         expect!(self, TokenType::Predicates)?;
-        let mut p = Vec::<Predicate>::new();
+        let mut predicates = Vec::<Predicate>::new();
         while let TokenType::LeftParen = self.tokens[self.idx].token_type {
             self.idx += 1;
-            let name = expect_get!(self, TokenType::Literal(predicate), predicate)?.clone();
-            let mut variable_count = 0;
+            let name = expect_get!(self, TokenType::Literal(name), name)?.clone();
+            let mut arity = 0;
             while let TokenType::Variable(_) = &self.tokens[self.idx].token_type {
                 self.idx += 1;
-                variable_count += 1;
+                arity += 1;
             }
+            predicates.push(Predicate{name, arity});
             expect!(self, TokenType::RightParen)?;
-            p.push(Predicate{name, variable_count})
         }
         expect!(self, TokenType::RightParen)?;
-        Ok(p)
+        Ok(predicates)
     }
 
-    fn actions(&mut self) -> Result<i32, ParserError> {
-        expect!(self, TokenType::LeftParen)?;
-        expect!(self, TokenType::Action)?;
-        let name = expect_get!(self, TokenType::Literal(name), name)?;
-        while 
-
-        expect!(self, TokenType::RightParen)?;
-        Ok(4)
-    }
-
-    fn domain(&mut self) -> Result<i32, ParserError> {
-        expect!(self, TokenType::LeftParen)?;
-        expect!(self, TokenType::Define)?;
+    fn domain(&mut self) -> Result<Domain, ParserError> {
         expect!(self, TokenType::LeftParen)?;
         expect!(self, TokenType::Domain)?;
-        let domain_name = expect_get!(self, TokenType::Literal(word), word)?;
-        println!("Domain name: {}", domain_name);
+        let name = expect_get!(self, TokenType::Literal(name), name)?.clone();
         expect!(self, TokenType::RightParen)?;
         let predicates = self.predicates()?;
-        self.actions();
-        expect!(self, TokenType::RightParen)?;
-        Ok(4)
+        let actions = self.actions()?;
+        Ok(Domain{name, predicates, actions})
     }
 
 
-    pub fn parse(tokens: &Vec<Token>) -> Result<i32, ParserError> {
-        let mut parser = Parser{idx:0, tokens};
-        parser.domain()
+    fn grammar(&mut self) -> Result<Domain, ParserError> {
+        expect!(self, TokenType::LeftParen)?;
+        expect!(self, TokenType::Define)?;
+        let r = if let TokenType::Domain = self.tokens[self.idx+1].token_type {
+            self.domain()?
+        } else {
+            Domain{name:"none".to_string(), actions:Vec::new(), predicates:Vec::new()}
+        };
+        expect!(self, TokenType::RightParen)?;
+        Ok(r)
+    }
 
+    pub fn parse(tokens: &Vec<Token>) -> Result<Domain, ParserError> {
+        let mut parser = Parser{idx:0, tokens};
+        parser.grammar()
     }
 }

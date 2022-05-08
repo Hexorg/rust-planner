@@ -12,5 +12,6 @@ fn main() {
     let pddl = fs::read_to_string("pddl-examples/rover/strips/domain.pddl")
         .expect("Error while opening .pddl file");
     let domain = pddl.parse::<Domain>().expect("Error while parsing .pddl");
+    println!("{}", domain);
 
 }
