@@ -1,6 +1,6 @@
 use std::fmt;
 use std::str::FromStr;
-use super::parser::{Lexer, Parser, ParserError};
+use super::parser::{Parser, ParserError};
 
 
 pub enum Expression {
@@ -84,9 +84,9 @@ pub struct Domain {
 impl fmt::Display for Domain {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let predicates = self.predicates.iter().take(1).fold(String::new(), |acc,item| acc + &format!("{}", item));
-        let predicates = self.predicates.iter().skip(1).fold(predicates, |acc,item| acc + " " + &format!("{}", item));
+        let predicates = self.predicates.iter().skip(1).fold(predicates, |acc,item| acc + &format!(" {}", item));
         let actions = self.actions.iter().take(1).fold(String::new(), |acc,item| acc + &format!("{}", item));
-        let actions = self.actions.iter().skip(1).fold(actions, |acc,item| acc + "\n" + &format!("{}", item));
+        let actions = self.actions.iter().skip(1).fold(actions, |acc,item| acc + &format!("\n{}", item));
         write!(f, "(define (domain {})\n (:predicates {})\n{}\n)", self.name, predicates, actions)
     }
 }
@@ -94,7 +94,6 @@ impl fmt::Display for Domain {
 impl FromStr for Domain {
     type Err = ParserError;
     fn from_str(pddl: &str) -> Result<Self, Self::Err> {
-        let tokens = Lexer::tokenize(pddl);
-        Parser::parse(&tokens)
+        Parser::parse_domain(pddl)
     }
 }

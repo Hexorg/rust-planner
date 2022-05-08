@@ -1,11 +1,11 @@
 use std::fmt;
-use super::domain::{Expression, Action, Predicate, Domain};
+use super::{domain::{Expression, Action, Predicate, Domain}, problem::Problem};
 
 pub struct Lexer { }
 
-pub struct Parser<'a> { 
+pub struct Parser { 
     idx: usize,
-    tokens: &'a Vec<Token>,
+    tokens: Vec<Token>,
 }
 
 pub struct ParserError{
@@ -25,6 +25,11 @@ enum TokenType {
     RightParen,
     Define,
     Domain,
+    DefDomain,
+    Problem,
+    Objects,
+    Goal,
+    Init,
     And,
     Or,
     Not,
@@ -50,6 +55,11 @@ impl fmt::Display for TokenType {
             TokenType::RightParen => write!(f, ")"),
             TokenType::Define => write!(f, "DEFINE"),
             TokenType::Domain => write!(f, "DOMAIN"),
+            TokenType::DefDomain => write!(f, ":domain"),
+            TokenType::Problem => write!(f, "problem"),
+            TokenType::Init => write!(f, ":init"),
+            TokenType::Goal => write!(f, ":goal"),
+            TokenType::Objects => write!(f, ":objects"),
             TokenType::Action => write!(f, ":action"),
             TokenType::Predicates => write!(f, ":predicates"),
             TokenType::Effect => write!(f, ":effect"),
@@ -91,8 +101,13 @@ impl Lexer {
                                 let new_type = match word.as_str() {
                                     "domain" => Some(TokenType::Domain),
                                     "define" => Some(TokenType::Define),
+                                    "problem" => Some(TokenType::Problem),
+                                    ":objects" => Some(TokenType::Objects),
+                                    ":init" => Some(TokenType::Init),
                                     ":action" => Some(TokenType::Action),
+                                    ":goal" => Some(TokenType::Goal),
                                     ":effect" => Some(TokenType::Effect),
+                                    ":domain" => Some(TokenType::DefDomain),
                                     ":parameters" => Some(TokenType::Parameters),
                                     ":precondition" => Some(TokenType::Precondition),
                                     ":predicates" => Some(TokenType::Predicates),
@@ -139,7 +154,7 @@ macro_rules! expect_get {
     };
 }
 
-impl Parser<'_> {
+impl Parser {
 
     fn expression(&mut self) -> Result<Expression, ParserError> {
         expect!(self, TokenType::LeftParen)?;
@@ -221,29 +236,75 @@ impl Parser<'_> {
 
     fn domain(&mut self) -> Result<Domain, ParserError> {
         expect!(self, TokenType::LeftParen)?;
+        expect!(self, TokenType::Define)?;
+        expect!(self, TokenType::LeftParen)?;
         expect!(self, TokenType::Domain)?;
         let name = expect_get!(self, TokenType::Literal(name), name)?.clone();
         expect!(self, TokenType::RightParen)?;
         let predicates = self.predicates()?;
         let actions = self.actions()?;
+        expect!(self, TokenType::RightParen)?;
         Ok(Domain{name, predicates, actions})
     }
 
-
-    fn grammar(&mut self) -> Result<Domain, ParserError> {
+    fn objects(&mut self) -> Result<Vec<String>, ParserError> {
         expect!(self, TokenType::LeftParen)?;
-        expect!(self, TokenType::Define)?;
-        let r = if let TokenType::Domain = self.tokens[self.idx+1].token_type {
-            self.domain()?
-        } else {
-            Domain{name:"none".to_string(), actions:Vec::new(), predicates:Vec::new()}
-        };
+        expect!(self, TokenType::Objects)?;
+        let mut r = Vec::<String>::new();
+        while let TokenType::Literal(name) = &self.tokens[self.idx].token_type {
+            self.idx += 1;
+            r.push(name.clone());
+        }
         expect!(self, TokenType::RightParen)?;
         Ok(r)
     }
 
-    pub fn parse(tokens: &Vec<Token>) -> Result<Domain, ParserError> {
-        let mut parser = Parser{idx:0, tokens};
-        parser.grammar()
+    fn init(&mut self) -> Result<Vec<(String, Vec<String>)>, ParserError> {
+        expect!(self, TokenType::LeftParen)?;
+        expect!(self, TokenType::Init)?;
+        let mut r = Vec::<(String, Vec<String>)>::new();
+        while let TokenType::LeftParen = self.tokens[self.idx].token_type {
+            self.idx += 1;
+            let mut vars = Vec::<String>::new();
+            let predicate = expect_get!(self, TokenType::Literal(name), name)?.clone();
+            while let TokenType::Literal(var) = &self.tokens[self.idx].token_type {
+                self.idx += 1;
+                vars.push(var.clone());
+            }
+            expect!(self, TokenType::RightParen)?;
+            r.push((predicate, vars));
+        }
+        expect!(self, TokenType::RightParen)?;
+        Ok(r)
+    }
+
+    fn problem(&mut self) -> Result<Problem, ParserError> {
+        expect!(self, TokenType::LeftParen)?;
+        expect!(self, TokenType::Define)?;
+        expect!(self, TokenType::LeftParen)?;
+        expect!(self, TokenType::Problem)?;
+        let name = expect_get!(self, TokenType::Literal(name), name)?.clone();
+        expect!(self, TokenType::RightParen)?;
+        expect!(self, TokenType::LeftParen)?;
+        expect!(self, TokenType::DefDomain)?;
+        let domain_name = expect_get!(self, TokenType::Literal(name), name)?.clone();
+        expect!(self, TokenType::RightParen)?;
+        let objects = self.objects()?;
+        let init = self.init()?;
+        expect!(self, TokenType::LeftParen)?;
+        expect!(self, TokenType::Goal)?;
+        let goal = self.expression()?;
+        expect!(self, TokenType::RightParen)?;
+        Ok(Problem{name, domain_name, objects, init, goal})
+    }
+
+    pub fn parse_domain(pddl: &str) -> Result<Domain, ParserError> {
+        let mut parser = Parser{idx:0, tokens:Lexer::tokenize(pddl)};
+        parser.domain()
+    }
+
+    pub fn parse_problem(pddl:&str) -> Result<Problem, ParserError> {
+        let mut parser = Parser{idx:0, tokens:Lexer::tokenize(pddl)};
+        parser.problem()
     }
 }
