@@ -2,7 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 use super::action::Action;
 use super::predicate::Predicate;
-use super::parser::Lexer;
+use super::parser::{Lexer, Parser};
 
 pub struct Domain<'a> {
     pub predicates: Vec<Predicate>,
@@ -33,9 +33,9 @@ impl FromStr for Domain<'_> {
     type Err = DomainParseError;
     fn from_str(pddl: &str) -> Result<Self, Self::Err> {
         let tokens = Lexer::tokenize(pddl);
-        println!("Tokens:");
-        for (idx, token) in tokens.iter().enumerate() {
-            println!("{}", token);
+        let domain = Parser::parse(&tokens);
+        if let Err(e) = domain {
+            println!("{:?}", e);
         }
         let actions = Vec::<Action>::new();
         let predicates = Vec::<Predicate>::new();
