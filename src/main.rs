@@ -1,19 +1,11 @@
 
-mod pddl;
-use pddl::{
-    domain::Domain,
-    problem::Problem,
-};
+mod htn;
+use htn::domain::{Domain};
 use std::fs;
 
 fn main() {
-    let pddl = fs::read_to_string("pddl-examples/rover/strips/domain.pddl")
-        .expect("Error while opening .pddl file");
-    let domain = pddl.parse::<Domain>().expect("Error while parsing domain");
-    println!("{}", domain);
-    let pddl = fs::read_to_string("pddl-examples/rover/strips/problem.pddl")
-        .expect("Error while opening .pddl file");
-    let problem = pddl.parse::<Problem>().expect("Error while parsing problem");
-    println!("{}", problem);
+    let htn_source = fs::read_to_string("htn-problems/sample.htn")
+        .expect("Error while opening .htn file");
+    let domain = htn_source.parse::<Domain>().expect("Error while parsing domain");
 
 }
