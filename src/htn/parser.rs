@@ -10,7 +10,7 @@ pub struct ParserError {
 
 impl fmt::Debug for ParserError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ParserError")
+        write!(f, "line:{} col:{} {}", self.line, self.col, self.message)
     }
 }
 
@@ -21,6 +21,7 @@ pub enum TokenData {
     ELSE,
     EFFECTS,
     LABEL(String),
+    LITERAL(i32),
     EQUALS,
     EQUALS_EQUALS,
     MINUS,
@@ -71,6 +72,7 @@ impl fmt::Display for TokenData {
             TokenData::ELSE => write!(f, "else"),
             TokenData::EFFECTS => write!(f, "effects"),
             TokenData::LABEL(l) => write!(f, "{}", l),
+            TokenData::LITERAL(l) => write!(f, "{}", l),
             TokenData::EQUALS => write!(f, "="),
             TokenData::EQUALS_EQUALS => write!(f, "=="),
             TokenData::MINUS => write!(f, "-"),
@@ -172,9 +174,9 @@ impl Lexer {
                             tab_depth = tab_depth / sc;
                         }
                         if tab_depth > last_line_tab_depth {
-                            r.push(Token{line, col, t:TokenData::BLOCK_START});
+                            r.push(Token{line, col:1, t:TokenData::BLOCK_START});
                         } else if tab_depth < last_line_tab_depth {
-                            r.push(Token{line, col, t:TokenData::BLOCK_END});
+                            r.push(Token{line, col:1, t:TokenData::BLOCK_END});
                         }
                         is_newline = false;
                     }
@@ -189,9 +191,12 @@ impl Lexer {
                             "or" => last_token.unwrap().t = TokenData::OR,
                             "and" => last_token.unwrap().t = TokenData::AND,
                             "not" => last_token.unwrap().t = TokenData::NOT,
+                            "false" => last_token.unwrap().t = TokenData::LITERAL(0),
+                            "true" => last_token.unwrap().t = TokenData::LITERAL(1),
                             _ => (),
                         }
                     } else {
+
                         r.push(Token{line, col, t:TokenData::LABEL(String::from(c))})
                     }
                 },
@@ -225,112 +230,353 @@ impl Lexer {
                     _ => (),
                 }
             }
-
+            if let Some(Token{t:TokenData::LABEL(label),..}) = r.last() {
+                if let Ok(literal) = label.parse::<i32>() {
+                    r.last_mut().unwrap().t = TokenData::LITERAL(literal);
+                }
+            }
         }
         r.push(Token{line, col, t:TokenData::EOF});
         Ok(r)
     }
 }
-enum AST {
-    Binary(Rc<AST>, Token, Rc<AST>),
-    Grouping(Rc<AST>),
-    Literal(Token),
-    Unary(Token, Rc<AST>)
+enum Expr {
+    Binary(Rc<Expr>, Token, Rc<Expr>), // left Token right
+    Grouping(Rc<Expr>), // group of expressions
+    Literal(i32),
+    Variable(String),
+    Unary(Token, Rc<Expr>) // Token right
 }
 
-impl fmt::Debug for AST {
+enum Stmt {
+    Method(String, Option<Expr>, Rc<Stmt>), // Name, condition, subtasks
+    Task(String, Option<Expr>, Rc<Stmt>, Option<Rc<Stmt>>), // Name, condition, methods, effects
+    Assignment(String, Expr), // destination, expression
+    Call(String, Vec<Expr>),
+    Block(Vec<Stmt>),
+    Expression(Expr)
+}
+impl fmt::Debug for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Binary(arg0, arg1, arg2) => write!(f, "({:?} {} {:?})", arg0, arg1.t, arg2),
-            Self::Grouping(arg0) => f.debug_tuple("Grouping").field(arg0).finish(),
-            Self::Literal(arg0) => write!(f, "{}", arg0.t),
+            Self::Grouping(arg0) => write!(f, "({:?})", arg0),
+            Self::Literal(arg0) => write!(f, "{}", arg0),
+            Self::Variable(arg0) => write!(f, "{}", arg0),
             Self::Unary(arg0, arg1) => f.debug_tuple("Unary").field(arg0).field(arg1).finish(),
         }
     }
 }
 
+impl fmt::Debug for Stmt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Method(arg0, arg1, arg2) => f.debug_tuple("Method").field(arg0).field(arg1).field(arg2).finish(),
+            Self::Task(arg0, arg1, arg2, arg3) => f.debug_tuple("Task").field(arg0).field(arg1).field(arg2).field(arg3).finish(),
+            Self::Assignment(arg0, arg1) => f.debug_tuple("Assignment").field(arg0).field(arg1).finish(),
+            Self::Call(arg0, arg1) => f.debug_tuple("Call").field(arg0).field(arg1).finish(),
+            Self::Block(arg0) => f.debug_tuple("Block").field(arg0).finish(),
+            Stmt::Expression(arg0) => write!(f, "{:?}", arg0),
+        }
+    }
+}
+
 impl Parser<'_> {
-    fn unary(&mut self) -> Result<AST, ParserError> {
+    fn error_recover(&mut self) {
+        self.idx += 1;
+        while self.idx + 1 != self.tokens.len() {
+            if let TokenData::NEW_LINE = self.tokens[self.idx-1].t {
+                return;
+            }
+            if let TokenData::TASK | TokenData::METHOD | TokenData::EFFECTS = self.tokens[self.idx].t {
+                return;
+            }
+            self.idx += 1;
+        }
+    }
+    fn unary(&mut self) -> Result<Expr, ParserError> {
         if let TokenData::NOT | TokenData::MINUS = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.unary()?;
-            Ok(AST::Unary(operator, Rc::new(right)))
+            Ok(Expr::Unary(operator, Rc::new(right)))
         } else {
             self.primary()
         }   
     }
-    fn factor(&mut self) -> Result<AST, ParserError> {
-        let mut ast = self.unary()?;
+    fn factor(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.unary()?;
         while let TokenData::SLASH | TokenData::STAR = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.unary()?;
-            ast = AST::Binary(Rc::new(ast), operator, Rc::new(right));
+            expr = Expr::Binary(Rc::new(expr), operator, Rc::new(right));
         }
-        Ok(ast)
+        Ok(expr)
     }
-    fn term(&mut self) -> Result<AST, ParserError> {
-        let mut ast = self.factor()?;
+    fn term(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.factor()?;
         while let TokenData::MINUS | TokenData::PLUS = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.factor()?;
-            ast = AST::Binary(Rc::new(ast), operator, Rc::new(right));
+            expr = Expr::Binary(Rc::new(expr), operator, Rc::new(right));
         }
-        Ok(ast)
+        Ok(expr)
     }
-    fn comparison(&mut self) -> Result<AST, ParserError> {
-        let mut ast = self.term()?;
+    fn comparison(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.term()?;
         while let TokenData::GREATER | TokenData::GREATER_OR_EQUALS | TokenData::SMALLER | TokenData::SMALLER_OR_EQUALS = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.term()?;
-            ast = AST::Binary(Rc::new(ast), operator, Rc::new(right));
+            expr = Expr::Binary(Rc::new(expr), operator, Rc::new(right));
         }
-        Ok(ast)
+        Ok(expr)
     }
-    fn equality(&mut self) -> Result<AST, ParserError> {
-        let mut ast = self.comparison()?;
+    fn equality(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.comparison()?;
         while let TokenData::NOT_EQUALS | TokenData::EQUALS_EQUALS = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.comparison()?;
-            ast = AST::Binary(Rc::new(ast), operator, Rc::new(right));
+            expr = Expr::Binary(Rc::new(expr), operator, Rc::new(right));
         }
-        Ok(ast)
+        Ok(expr)
     }
-    fn expression(&mut self) -> Result<AST, ParserError> {
+    fn expression(&mut self) -> Result<Expr, ParserError> {
         self.equality()
     }
-    fn primary(&mut self) -> Result<AST, ParserError> {
+    fn primary(&mut self) -> Result<Expr, ParserError> {
         // Literal | "(" expression ")"
-        if let TokenData::LABEL(_) = self.tokens[self.idx].t {
-            let token = self.tokens[self.idx].clone();
+        if let TokenData::LITERAL(val)  = self.tokens[self.idx].t {
             self.idx += 1;
-            Ok(AST::Literal(token))
+            Ok(Expr::Literal(val))
         } else if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
-            let ast = self.expression()?;
+            self.idx += 1;
+            let expr = self.expression()?;
             if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
                 self.idx += 1;
-                Ok(ast)
+                Ok(Expr::Grouping(Rc::new(expr)))
             } else {
                 let line = self.tokens[self.idx].line;
                 let col = self.tokens[self.idx].col;
                 Err(ParserError{line, col, message:String::from("Expected ')' after expression.")})
             }
+        } else if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
+            self.idx += 1;
+            Ok(Expr::Variable(name.clone()))
         } else {
             let line = self.tokens[self.idx].line;
             let col = self.tokens[self.idx].col;
-            Err(ParserError{line, col, message:String::from("Unexpected end of primary expression.")})
+            Err(ParserError{line, col, message:String::from("Expected expression.")}).unwrap()
         }
 
+    }
+    fn effects_statement(&mut self) -> Result<Stmt, ParserError> {
+        if let TokenData::COLON = self.tokens[self.idx].t {
+            self.idx += 1;
+            if let TokenData::NEW_LINE = self.tokens[self.idx].t {
+                self.idx += 1;
+                self.statement()
+            } else {
+                let line = self.tokens[self.idx].line;
+                let col = self.tokens[self.idx].col;
+                Err(ParserError{line, col, message:String::from("Expected new line after effects statement.")})
+            }
+        } else {
+            let line = self.tokens[self.idx].line;
+            let col = self.tokens[self.idx].col;
+            Err(ParserError{line, col, message:String::from("Expected ':' after 'effects'.")})
+        }
+    }
+    fn task_statement(&mut self) -> Result<Stmt, ParserError> {
+        if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
+            self.idx += 1;
+            let mut conditions : Option<Expr> = None;
+            if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
+                self.idx += 1;
+                conditions = Some(self.expression()?);
+                if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
+                    self.idx += 1;
+                } else {
+                    let line = self.tokens[self.idx].line;
+                    let col = self.tokens[self.idx].col;
+                    return Err(ParserError{line, col, message:String::from("Expected ')' after task conditions.")})
+                }
+            }
+            if let TokenData::COLON = self.tokens[self.idx].t {
+                self.idx += 1;
+                if let TokenData::NEW_LINE = self.tokens[self.idx].t {
+                    self.idx += 1;
+                    let task_block = self.statement()?;
+                    let mut effects_block = None;
+                    if let TokenData::EFFECTS = self.tokens[self.idx].t {
+                        self.idx += 1;
+                        effects_block = Some(Rc::new(self.effects_statement()?));
+                    }
+                    Ok(Stmt::Task(name.clone(), conditions, Rc::new(task_block), effects_block))
+                } else {
+                    let line = self.tokens[self.idx].line;
+                    let col = self.tokens[self.idx].col;
+                    Err(ParserError{line, col, message:String::from("Expected new line after task statement.")})
+                }
+            } else {
+                let line = self.tokens[self.idx].line;
+                let col = self.tokens[self.idx].col;
+                Err(ParserError{line, col, message:String::from("Expected ':' after task label.")})
+            }
+        } else {
+            let line = self.tokens[self.idx].line;
+            let col = self.tokens[self.idx].col;
+            Err(ParserError{line, col, message:String::from("Expected label after 'task'.")})
+        }
+    }
+    fn expression_statement(&mut self) -> Result<Stmt, ParserError> {
+        let expr = self.expression()?;
+        if let TokenData::NEW_LINE | TokenData::EOF  = self.tokens[self.idx].t {
+            self.idx += 1;
+            Ok(Stmt::Expression(expr))
+        } else {
+            let line = self.tokens[self.idx].line;
+            let col = self.tokens[self.idx].col;
+            Err(ParserError{line, col, message:String::from("Expected new line after expression.")})
+        }
+    }
+    fn call_statement(&mut self) -> Result<Stmt, ParserError> {
+        if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
+            self.idx += 1;
+            if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
+                self.idx += 1;
+                let mut args = Vec::<Expr>::new();
+                loop { 
+                    if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
+                        self.idx += 1;
+                        break
+                    } else {
+                        args.push(self.expression()?);
+                    }
+                }
+                if let TokenData::NEW_LINE | TokenData::EOF = self.tokens[self.idx].t {
+                    self.idx += 1;
+                } else {
+                    let line = self.tokens[self.idx].line;
+                    let col = self.tokens[self.idx].col;
+                    return Err(ParserError{line, col, message:String::from("Expected new line after call.")})
+                }
+                Ok(Stmt::Call(name.clone(), args))
+            } else {
+                let line = self.tokens[self.idx].line;
+                let col = self.tokens[self.idx].col;
+                Err(ParserError{line, col, message:String::from("Expected '(' after task name.")})
+            }
+        } else {
+            let line = self.tokens[self.idx].line;
+            let col = self.tokens[self.idx].col;
+            Err(ParserError{line, col, message:String::from("Expected task identifier.")})
+        }
+    }
+    fn assignment_statement(&mut self) -> Result<Stmt, ParserError> {
+        if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
+            self.idx += 1;
+            match self.tokens[self.idx].t {
+                TokenData::EQUALS => {self.idx += 1; Ok(Stmt::Assignment(name.clone(), self.expression()?))},
+                TokenData::ADD_TO => {self.idx += 1; Ok(Stmt::Assignment(name.clone(), Expr::Binary(Rc::new(Expr::Variable(name.clone())), Token{line:0, col:0, t:TokenData::PLUS}, Rc::new(self.expression()?))))},
+                TokenData::SUBTRACT_FROM => {self.idx += 1; Ok(Stmt::Assignment(name.clone(), Expr::Binary(Rc::new(Expr::Variable(name.clone())), Token{line:0, col:0, t:TokenData::MINUS}, Rc::new(self.expression()?))))},
+                TokenData::MULTIPLY_BY => {self.idx += 1; Ok(Stmt::Assignment(name.clone(), Expr::Binary(Rc::new(Expr::Variable(name.clone())), Token{line:0, col:0, t:TokenData::STAR}, Rc::new(self.expression()?))))},
+                TokenData::DIVIDE_BY => {self.idx += 1; Ok(Stmt::Assignment(name.clone(), Expr::Binary(Rc::new(Expr::Variable(name.clone())), Token{line:0, col:0, t:TokenData::SLASH}, Rc::new(self.expression()?))))},
+                _ => {
+                    let line = self.tokens[self.idx].line;
+                    let col = self.tokens[self.idx].col;
+                    Err(ParserError{line, col, message:String::from("Expected '=' after variable name.")})
+                }
+            }
+        } else {
+            let line = self.tokens[self.idx].line;
+            let col = self.tokens[self.idx].col;
+            Err(ParserError{line, col, message:String::from("Expected identifier to assign to.")})
+        }
+    }
+    fn block_statement(&mut self) -> Result<Stmt, ParserError> {
+
+        let mut stmts = Vec::<Stmt>::new();
+        loop {
+            stmts.push(self.statement()?);
+            if let TokenData::BLOCK_END | TokenData::EOF = self.tokens[self.idx].t {
+                self.idx += 1;
+                return Ok(Stmt::Block(stmts))
+            } 
+        }
+        
+    }
+    fn method_statement(&mut self) -> Result<Stmt, ParserError> {
+        if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
+            self.idx += 1;
+            let mut conditions: Option<Expr> = None;
+            if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
+                self.idx += 1;
+                conditions = Some(self.expression()?);
+                if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
+                    self.idx += 1;
+                } else {
+                    let line = self.tokens[self.idx].line;
+                    let col = self.tokens[self.idx].col;
+                    return Err(ParserError{line, col, message:String::from("Expected ')' after method conditions.'")})
+                }
+            }
+            if let TokenData::COLON = self.tokens[self.idx].t {
+                self.idx += 1;
+                if let TokenData::NEW_LINE = self.tokens[self.idx].t {
+                    self.idx += 1;
+                    Ok(Stmt::Method(name.clone(), conditions, Rc::new(self.statement()?)))
+                } else {
+                    let line = self.tokens[self.idx].line;
+                    let col = self.tokens[self.idx].col;
+                    Err(ParserError{line, col, message:String::from("Expected new line after ':'")})
+                }
+            } else {
+                let line = self.tokens[self.idx].line;
+                let col = self.tokens[self.idx].col;
+                return Err(ParserError{line, col, message:String::from("Expected ':' after method declaration.")})
+            }
+        } else {
+            let line = self.tokens[self.idx].line;
+            let col = self.tokens[self.idx].col;
+            Err(ParserError{line, col, message:String::from("Expected method name.")})
+        }
+    }
+    fn statement(&mut self) -> Result<Stmt, ParserError> {
+        if let TokenData::TASK = self.tokens[self.idx].t {
+            self.idx += 1;
+            self.task_statement()
+        } else if let TokenData::BLOCK_START = self.tokens[self.idx].t {
+            self.idx += 1;
+            self.block_statement()
+        } else if let TokenData::METHOD = self.tokens[self.idx].t {
+            self.idx += 1;
+            self.method_statement()
+        } else if let TokenData::LABEL(_) = self.tokens[self.idx].t {
+            if let TokenData::OPEN_PAREN = self.tokens[self.idx+1].t {
+                self.call_statement()
+            } else if let TokenData::EQUALS | TokenData::ADD_TO | TokenData::SUBTRACT_FROM | TokenData::MULTIPLY_BY | TokenData::DIVIDE_BY = self.tokens[self.idx+1].t {
+                self.assignment_statement()
+            } else {
+                let line = self.tokens[self.idx].line;
+                let col = self.tokens[self.idx].col;
+                Err(ParserError{line, col, message:String::from("Expected function call or assignment.")})
+            }
+        } else {
+            let line = self.tokens[self.idx].line;
+            let col = self.tokens[self.idx].col;
+            Err(ParserError{line, col, message:String::from("Expression statements are not supported.")}).unwrap()
+            // self.expression_statement()
+        }
     }
     pub fn parse(htn_source: &str) -> Result<Domain, ParserError> {
         let tokens = &Lexer::tokenize(htn_source)?;
         println!("{:?}", tokens);
         let mut parser = Parser{idx:0, tokens};
-        println!("{:?}", parser.expression()?);
+        println!("{:?}", parser.statement()?);
         Ok(Domain{})
     }
 }
