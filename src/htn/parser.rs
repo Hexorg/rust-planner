@@ -8,6 +8,11 @@ pub struct ParserError {
     message: String
 }
 
+impl fmt::Display for ParserError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "line:{} col:{} {}", self.line, self.col, self.message)
+    }
+}
 impl fmt::Debug for ParserError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "line:{} col:{} {}", self.line, self.col, self.message)
@@ -50,7 +55,7 @@ pub enum TokenData {
 
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Token {
     line: usize,
     col: usize,
@@ -58,9 +63,15 @@ pub struct Token {
     t: TokenData,
 }
 
-impl fmt::Debug for Token{
+impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Token").field("line", &self.line).field("col", &self.col).field("t", &self.t).finish()
+        write!(f, "{} ", self.t)?;
+        if let TokenData::NEW_LINE = self.t {
+            write!(f, "{:.4}: ", self.line)
+        } else {
+            Ok(())
+        }
+        
     }
 }
 
@@ -96,7 +107,7 @@ impl fmt::Display for TokenData {
             TokenData::COLON => write!(f, ":"),
             TokenData::BLOCK_START => write!(f, "{{"),
             TokenData::BLOCK_END => write!(f, "}}"),
-            TokenData::NEW_LINE => write!(f, "\n"),
+            TokenData::NEW_LINE => write!(f, "\\n\n"),
             TokenData::EOF => write!(f, "<<EOF"),
         }
     }
@@ -147,7 +158,7 @@ impl Lexer {
                 '|' => r.push(Token{line, col, t:TokenData::OR}),
                 '&' => r.push(Token{line, col, t:TokenData::AND}),
                 '\n' => { if let Some(Token{t:TokenData::NEW_LINE,..}) = r.last() {
-                    println!("Double new line at line:{} col:{} last_line_tab_depth:{}", line, col, last_line_tab_depth);
+                    // println!("Double new line at line:{} col:{} last_line_tab_depth:{}", line, col, last_line_tab_depth);
                         while last_line_tab_depth > 0 {
                             r.push(Token{line, col, t:TokenData::BLOCK_END});
                             last_line_tab_depth -= 1;
@@ -167,6 +178,7 @@ impl Lexer {
                     if is_newline {
                         if let Some(DepthSeparator::SPACES(0)) = depth_separator {
                             depth_separator = Some(DepthSeparator::SPACES(tab_depth));
+                            tab_depth = 1;
                         } else if let Some(DepthSeparator::SPACES(sc)) = depth_separator {
                             if tab_depth % sc != 0 {
                                 return Err(ParserError{line, col, message:String::from("Unexpected amount of spaces")});
@@ -175,7 +187,7 @@ impl Lexer {
                         }
                         if tab_depth > last_line_tab_depth {
                             r.push(Token{line, col:1, t:TokenData::BLOCK_START});
-                        } else if tab_depth < last_line_tab_depth {
+                        } else if tab_depth < last_line_tab_depth { 
                             r.push(Token{line, col:1, t:TokenData::BLOCK_END});
                         }
                         is_newline = false;
@@ -240,6 +252,7 @@ impl Lexer {
         Ok(r)
     }
 }
+#[derive(Clone)]
 enum Expr {
     Binary(Rc<Expr>, Token, Rc<Expr>), // left Token right
     Grouping(Rc<Expr>), // group of expressions
@@ -528,7 +541,29 @@ impl Parser<'_> {
                 self.idx += 1;
                 if let TokenData::NEW_LINE = self.tokens[self.idx].t {
                     self.idx += 1;
-                    Ok(Stmt::Method(name.clone(), conditions, Rc::new(self.statement()?)))
+                    let parent_statemet = Stmt::Method(name.clone(), conditions.clone(), Rc::new(self.statement()?));
+                    if let TokenData::ELSE = self.tokens[self.idx].t {
+                        self.idx += 1;
+                        if let TokenData::COLON = self.tokens[self.idx].t {
+                            self.idx += 1;
+                            if let TokenData::NEW_LINE = self.tokens[self.idx].t {
+                                self.idx += 1;
+                                let else_conditions = Expr::Unary(Token{line:0, col:0, t:TokenData::NOT}, Rc::new(conditions.unwrap()));
+                                let else_statement = Stmt::Method(format!("Dont{}", name), Some(else_conditions), Rc::new(self.statement()?));
+                                Ok(Stmt::Block(vec![parent_statemet, else_statement]))
+                            } else {
+                                let line = self.tokens[self.idx].line;
+                                let col = self.tokens[self.idx].col;
+                                Err(ParserError{line, col, message:String::from("Expected new line after ':'")})
+                            }
+                        } else {
+                            let line = self.tokens[self.idx].line;
+                            let col = self.tokens[self.idx].col;
+                            return Err(ParserError{line, col, message:String::from("Expected ':' after method declaration.")})
+                        }
+                    } else {
+                        Ok(parent_statemet)
+                    }
                 } else {
                     let line = self.tokens[self.idx].line;
                     let col = self.tokens[self.idx].col;
@@ -568,15 +603,20 @@ impl Parser<'_> {
         } else {
             let line = self.tokens[self.idx].line;
             let col = self.tokens[self.idx].col;
-            Err(ParserError{line, col, message:String::from("Expression statements are not supported.")}).unwrap()
+            Err(ParserError{line, col, message:String::from("Expression statements are not supported.")})
             // self.expression_statement()
         }
     }
     pub fn parse(htn_source: &str) -> Result<Domain, ParserError> {
         let tokens = &Lexer::tokenize(htn_source)?;
-        println!("{:?}", tokens);
+        println!("{}", tokens.iter().fold(String::new(), |acc, item| acc + &format!("{}", item)));
         let mut parser = Parser{idx:0, tokens};
-        println!("{:?}", parser.statement()?);
+        loop {
+            match parser.block_statement() {
+                Err(e) => { println!("{}", e); parser.error_recover() },
+                Ok(s) => { println!("{:?}", s); break}
+            }
+        }
         Ok(Domain{})
     }
 }
