@@ -1,5 +1,5 @@
 task BeTrunkThumper:
-    method Attack(WsCanSeeEnemy): # name(conditions)
+    method (WsCanSeeEnemy): # name(conditions)
         AttackEnemy()
     else: # syntactic sugar for "method bla(!WsCanSeeEnemy)"
         ChooseBridgeToCheck()
@@ -20,7 +20,7 @@ task AttackEnemy:
 
 task DoTrunkSlam:
     DoTrunkSlamOperator()
-effects
+effects:
     WsTrunkHealth -= 1
 
 
@@ -35,11 +35,11 @@ task NavigateToEnemy:
 
 task NavigateToTrunk(foundTrunk):
     NavigateTo(trunk)
-effects
+effects:
     atTrunk = True
 
 
-task UprootTrunk(atTrunk)
+task UprootTrunk(atTrunk):
     UprootTrunkOperator(trunk)
 effects:
     WsTrunkHealth = 3
