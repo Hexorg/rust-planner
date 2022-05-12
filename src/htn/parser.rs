@@ -158,13 +158,14 @@ impl Lexer {
                 '|' => r.push(Token{line, col, t:TokenData::OR}),
                 '&' => r.push(Token{line, col, t:TokenData::AND}),
                 '\n' => { if let Some(Token{t:TokenData::NEW_LINE,..}) = r.last() {
-                    // println!("Double new line at line:{} col:{} last_line_tab_depth:{}", line, col, last_line_tab_depth);
+                    // println!("line at line:{} col:{} last_line_tab_depth:{}", line, col, last_line_tab_depth);
                         while last_line_tab_depth > 0 {
                             r.push(Token{line, col, t:TokenData::BLOCK_END});
                             last_line_tab_depth -= 1;
                         }
+                    } else {
+                        r.push(Token{line, col, t:TokenData::NEW_LINE}); 
                     }
-                    r.push(Token{line, col, t:TokenData::NEW_LINE}); 
                     is_comment = false; 
                     is_newline = true;
                     last_line_tab_depth = tab_depth;
@@ -515,6 +516,7 @@ impl Parser<'_> {
         let mut stmts = Vec::<Stmt>::new();
         loop {
             stmts.push(self.statement()?);
+
             if let TokenData::BLOCK_END | TokenData::EOF = self.tokens[self.idx].t {
                 self.idx += 1;
                 return Ok(Stmt::Block(stmts))
@@ -528,13 +530,17 @@ impl Parser<'_> {
             let mut conditions: Option<Expr> = None;
             if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
                 self.idx += 1;
-                conditions = Some(self.expression()?);
                 if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
                     self.idx += 1;
                 } else {
-                    let line = self.tokens[self.idx].line;
-                    let col = self.tokens[self.idx].col;
-                    return Err(ParserError{line, col, message:String::from("Expected ')' after method conditions.'")})
+                    conditions = Some(self.expression()?);
+                    if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
+                        self.idx += 1;
+                    } else {
+                        let line = self.tokens[self.idx].line;
+                        let col = self.tokens[self.idx].col;
+                        return Err(ParserError{line, col, message:String::from("Expected ')' after method conditions.'")})
+                    }
                 }
             }
             if let TokenData::COLON = self.tokens[self.idx].t {
@@ -581,7 +587,8 @@ impl Parser<'_> {
         }
     }
     fn statement(&mut self) -> Result<Stmt, ParserError> {
-        if let TokenData::TASK = self.tokens[self.idx].t {
+        // println!("When Parsing a new statement, next token is {}.", self.tokens[self.idx]);
+        let r = if let TokenData::TASK = self.tokens[self.idx].t {
             self.idx += 1;
             self.task_statement()
         } else if let TokenData::BLOCK_START = self.tokens[self.idx].t {
@@ -605,7 +612,9 @@ impl Parser<'_> {
             let col = self.tokens[self.idx].col;
             Err(ParserError{line, col, message:String::from("Expression statements are not supported.")})
             // self.expression_statement()
-        }
+        };
+        // println!("After parsing a statement, next token is {}.", self.tokens[self.idx]);
+        r
     }
     pub fn parse(htn_source: &str) -> Result<Domain, ParserError> {
         let tokens = &Lexer::tokenize(htn_source)?;
