@@ -57,6 +57,7 @@ pub enum TokenData {
 pub struct Token {
     line: usize,
     col: usize,
+    len: usize,
     // tab_depth: usize,
     t: TokenData,
 }
@@ -131,25 +132,26 @@ impl Lexer {
         let mut is_comment = false; // ignores the rest of the line
         let mut is_newline = true; // stays true between \n and first non-whitespace characters to allow for tabs vs spaces detection
         let mut r = Vec::<Token>::new(); // result
-        for c in htn_source.chars() {
+        let mut it = htn_source.chars().peekable();
+        while let Some(c) = it.next() {
             if is_comment && c != '\n' {
                 continue;
             }
             match c {
                 '#' => is_comment = true,
-                ':' => r.push(Token{line, col, t:TokenData::COLON}),
-                '(' => r.push(Token{line, col, t:TokenData::OPEN_PAREN}),
-                ')' => r.push(Token{line, col, t:TokenData::CLOSE_PAREN}),
-                '=' => r.push(Token{line, col, t:TokenData::EQUALS}),
-                '-' => r.push(Token{line, col, t:TokenData::MINUS}),
-                '+' => r.push(Token{line, col, t:TokenData::PLUS}),
-                '/' => r.push(Token{line, col, t:TokenData::SLASH}),
-                '*' => r.push(Token{line, col, t:TokenData::STAR}),
-                '>' => r.push(Token{line, col, t:TokenData::GREATER}),
-                '<' => r.push(Token{line, col, t:TokenData::SMALLER}),
-                '!' => r.push(Token{line, col, t:TokenData::NOT}),
-                '|' => r.push(Token{line, col, t:TokenData::OR}),
-                '&' => r.push(Token{line, col, t:TokenData::AND}),
+                ':' => r.push(Token{line, col, len:1, t:TokenData::COLON}),
+                '(' => r.push(Token{line, col, len:1, t:TokenData::OPEN_PAREN}),
+                ')' => r.push(Token{line, col, len:1, t:TokenData::CLOSE_PAREN}),
+                '=' => r.push(Token{line, col, len:1, t:TokenData::EQUALS}),
+                '-' => r.push(Token{line, col, len:1, t:TokenData::MINUS}),
+                '+' => r.push(Token{line, col, len:1, t:TokenData::PLUS}),
+                '/' => r.push(Token{line, col, len:1, t:TokenData::SLASH}),
+                '*' => r.push(Token{line, col, len:1, t:TokenData::STAR}),
+                '>' => r.push(Token{line, col, len:1, t:TokenData::GREATER}),
+                '<' => r.push(Token{line, col, len:1, t:TokenData::SMALLER}),
+                '!' => r.push(Token{line, col, len:1, t:TokenData::NOT}),
+                '|' => r.push(Token{line, col, len:1, t:TokenData::OR}),
+                '&' => r.push(Token{line, col, len:1, t:TokenData::AND}),
                 '\n' => { 
                     is_comment = false; 
                     is_newline = true;
@@ -166,48 +168,57 @@ impl Lexer {
                             tab_depth = 1;
                         } else if let Some(DepthSeparator::SPACES(sc)) = depth_separator { // we already know that we're using spaces and how many
                             if tab_depth % sc != 0 {
-                                return Err(ParserError{line, col, message:String::from("Unexpected amount of spaces")});
+                                return Err(ParserError{line, col, message:String::from("Unexpected amount of spaces.")});
                             }
                             tab_depth = tab_depth / sc;
                         } // else we're using tabs and '\t' => branch of this match counts tab_depth properly
                         if tab_depth > last_block_tab_depth { // new block start
-                            r.push(Token{line, col:1, t:TokenData::BLOCK_START});
+                            if let Some(Token{t:TokenData::BLOCK_END,..}) = r.last() {
+                                return Err(ParserError{line, col, message:String::from("Unexpected block identation.")});
+                            }
+                            r.push(Token{line, col:1, len:0, t:TokenData::BLOCK_START});
                             last_block_tab_depth = tab_depth;
                         } else if tab_depth == last_block_tab_depth && r.len() > 0 { // it's a new line for the old block. Previous statement has ended.
-                            r.push(Token{line:line-1, col:r.last().unwrap().col+1, t:TokenData::STATEMENT_END});
+                            r.push(Token{line:line-1, col:r.last().unwrap().col+1, len:0, t:TokenData::STATEMENT_END});
                         } else {
                             while tab_depth < last_block_tab_depth {  // block(s) have ended
                                 if let Some(Token{t:TokenData::BLOCK_END,..}) = r.last() {
                                     // if multiple blocks are ending, just keep adding BLOCK_END
                                 } else {
                                     // last block has ended, so did the previous statement
-                                    r.push(Token{line:line-1, col:r.last().unwrap().col+1, t:TokenData::STATEMENT_END});
+                                    r.push(Token{line:line-1, col:r.last().unwrap().col+1, len:0, t:TokenData::STATEMENT_END});
                                 }
-                                r.push(Token{line, col:1, t:TokenData::BLOCK_END});
+                                r.push(Token{line, col:1, len:0, t:TokenData::BLOCK_END});
                                 last_block_tab_depth -=1;
                             }
                         }
                         is_newline = false;
                     } // done with tab depth detection
                     // Now to see what kind of token this character will yield.
-                    let last_token = r.last_mut();
-                    if let Some(Token{t:TokenData::LABEL(ref mut label), ..}) = last_token {
-                        label.push(c); // if the last token is a label, append to label
-                        match label.as_str() { // if the label composes a keyword, replace with keyword
-                            // TODO: BUG: taskDoer will become TASK and LABEL(Doer)
-                            "task" => last_token.unwrap().t = TokenData::TASK,
-                            "method" => last_token.unwrap().t = TokenData::METHOD,
-                            "else" => last_token.unwrap().t = TokenData::ELSE,
-                            "effects" => last_token.unwrap().t = TokenData::EFFECTS,
-                            "or" => last_token.unwrap().t = TokenData::OR,
-                            "and" => last_token.unwrap().t = TokenData::AND,
-                            "not" => last_token.unwrap().t = TokenData::NOT,
-                            "false" => last_token.unwrap().t = TokenData::LITERAL(0),
-                            "true" => last_token.unwrap().t = TokenData::LITERAL(1),
-                            _ => (),
+                    if let Some(mut last_token) = r.last_mut() {
+                        if let Token{t:TokenData::LABEL(label), ..} = last_token {
+                            label.push(c);
+                            if let Some(next_char) = it.peek() {
+                                if !next_char.is_alphanumeric() {
+                                    match label.as_str() { // if the label composes a keyword, replace with keyword
+                                        "task" => {last_token.t = TokenData::TASK; last_token.len = 4},
+                                        "method" => {last_token.t = TokenData::METHOD; last_token.len = 6},
+                                        "else" => {last_token.t = TokenData::ELSE; last_token.len = 4},
+                                        "effects" => {last_token.t = TokenData::EFFECTS; last_token.len = 7},
+                                        "or" => {last_token.t = TokenData::OR; last_token.len = 2},
+                                        "and" => {last_token.t = TokenData::AND; last_token.len = 3},
+                                        "not" => {last_token.t = TokenData::NOT; last_token.len = 3},
+                                        "false" => {last_token.t = TokenData::LITERAL(0); last_token.len = 4},
+                                        "true" => {last_token.t = TokenData::LITERAL(1); last_token.len = 4},
+                                        _ => {last_token.len = label.len()},
+                                    }
+                                }
+                            }
+                        } else { // last token isn't a label so we're starting a new label or keyword
+                            r.push(Token{line, col, len:1, t:TokenData::LABEL(String::from(c))})
                         }
-                    } else { // last token isn't a label so we're starting a new label or keyword
-                        r.push(Token{line, col, t:TokenData::LABEL(String::from(c))})
+                    } else {
+                        r.push(Token{line, col, len:1, t:TokenData::LABEL(String::from(c))})
                     }
                 },
                 '\t' if is_newline => { if depth_separator.is_none() { // if we don't know if we're using tabs or spaces
@@ -217,12 +228,13 @@ impl Lexer {
                     }
                     tab_depth += 1;
                 },
-                c if c.is_whitespace() && is_newline => { if depth_separator.is_none() {
-                        depth_separator = Some(DepthSeparator::SPACES(0));
-                    } else if let Some(DepthSeparator::TABS) = depth_separator {
-                        return Err(ParserError{line, col, message:String::from("Tabs and spaces can't be used together")})
-                    }
-                    tab_depth += 1; // tab_depth counts amount of spaces seen first. Then on the first non-whitespace character we convert amount of spaces to actual tab-depth
+                c if c.is_whitespace() && is_newline => { 
+                        if depth_separator.is_none() {
+                            depth_separator = Some(DepthSeparator::SPACES(0));
+                        } else if let Some(DepthSeparator::TABS) = depth_separator {
+                            return Err(ParserError{line, col, message:String::from("Tabs and spaces can't be used together")})
+                        }
+                        tab_depth += 1; // tab_depth counts amount of spaces seen first. Then on the first non-whitespace character we convert amount of spaces to actual tab-depth
                 },
                 _ => (),
             }
@@ -248,13 +260,13 @@ impl Lexer {
         }
         // End of file. Finish off whatever blocks have been here
         if last_block_tab_depth > 0 {
-            r.push(Token{line, col, t:TokenData::STATEMENT_END});
+            r.push(Token{line, col, len:0, t:TokenData::STATEMENT_END});
             while last_block_tab_depth > 0 {
-                r.push(Token{line, col, t:TokenData::BLOCK_END});
+                r.push(Token{line, col, len:0, t:TokenData::BLOCK_END});
                 last_block_tab_depth -= 1;
             }
         }
-        r.push(Token{line, col, t:TokenData::EOF});
+        r.push(Token{line, col, len:0, t:TokenData::EOF});
         Ok(r)
     }
 }
@@ -368,10 +380,10 @@ impl Parser<'_> {
                 if let Expr::Variable(varname) = &target {
                     let value_expr = match self.tokens[self.idx].t {
                         // TokenData::EQUALS => self.expression()?,
-                        TokenData::ADD_TO => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, t:TokenData::PLUS}, Rc::new(self.expression()?)),
-                        TokenData::SUBTRACT_FROM => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, t:TokenData::MINUS}, Rc::new(self.expression()?)),
-                        TokenData::MULTIPLY_BY => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, t:TokenData::STAR}, Rc::new(self.expression()?)),
-                        TokenData::DIVIDE_BY => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, t:TokenData::SLASH}, Rc::new(self.expression()?)),
+                        TokenData::ADD_TO => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::PLUS}, Rc::new(self.expression()?)),
+                        TokenData::SUBTRACT_FROM => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::MINUS}, Rc::new(self.expression()?)),
+                        TokenData::MULTIPLY_BY => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::STAR}, Rc::new(self.expression()?)),
+                        TokenData::DIVIDE_BY => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::SLASH}, Rc::new(self.expression()?)),
                         _ => self.expression()?,
                     };
                     Ok(Expr::Assignment(varname.clone(), Rc::new(value_expr)))
@@ -418,8 +430,8 @@ impl Parser<'_> {
             self.idx += 1;
             self.statement()
         } else {
-            let line = self.tokens[self.idx].line;
-            let col = self.tokens[self.idx].col;
+            let line = self.tokens[self.idx-1].line;
+            let col = self.tokens[self.idx-1].col + self.tokens[self.idx-1].len;
             Err(ParserError{line, col, message:String::from("Expected ':' after 'effects'.")})
         }
     }
@@ -460,7 +472,7 @@ impl Parser<'_> {
     }
     fn expression_statement(&mut self) -> Result<Stmt, ParserError> {
         let expr = self.expression()?;
-        if let TokenData::STATEMENT_END  = self.tokens[self.idx].t {
+        if let TokenData::STATEMENT_END | TokenData::BLOCK_START | TokenData::BLOCK_END  = self.tokens[self.idx].t {
             self.idx += 1;
             Ok(Stmt::Expression(expr))
         } else {
@@ -512,7 +524,7 @@ impl Parser<'_> {
                     self.idx += 1;
                     if let TokenData::COLON = self.tokens[self.idx].t {
                         self.idx += 1;
-                        let else_conditions = Expr::Unary(Token{line:0, col:0, t:TokenData::NOT}, Rc::new(conditions.unwrap()));
+                        let else_conditions = Expr::Unary(Token{line:0, col:0, len:0, t:TokenData::NOT}, Rc::new(conditions.unwrap()));
                         let else_statement = Stmt::Method(format!("Dont{}", name), Some(else_conditions), Rc::new(self.statement()?));
                         Ok(Stmt::Block(vec![parent_statemet, else_statement]))
                     } else {
@@ -574,14 +586,31 @@ impl Parser<'_> {
             }
         ));
     }
-    pub fn parse(htn_source: &str) -> Result<Vec<Stmt>, ParserError> {
+    pub fn parse(htn_source: &str, filename:Option<&str>) -> Result<Vec<Stmt>, ParserError> {
         let tokens = &Lexer::tokenize(htn_source)?;
-        // Parser::print_tokens(tokens);
+        Parser::print_tokens(tokens);
         let mut parser = Parser{idx:0, tokens};
         let mut ast = Vec::<Stmt>::new();
+        let mut lines = htn_source.lines();
+        let mut last_error_line = 0;
         while parser.idx + 1 < tokens.len() {
             match parser.statement() {
-                Err(e) => { eprintln!(">>> {}", e); parser.error_recover() },
+                Err(e) => { 
+                    if let Some(eline) = lines.nth(e.line - last_error_line-1) {
+                        let line_number_string = format!("{}", e.line);
+                        if let Some(f) = filename {
+                            eprintln!("{}:{} Error:", f, e.line); 
+                        } else {
+                            eprintln!("line:{} Error:", e.line); 
+                        }
+                        eprintln!("\t{}: {}", line_number_string, eline);
+                        last_error_line = e.line;
+                        let debug_str_col_pos = line_number_string.len() + 2 + e.col;
+                        eprintln!("\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos); 
+
+                        parser.error_recover(); 
+                    }
+                },
                 Ok(s) => { ast.push(s); }
             }
         }

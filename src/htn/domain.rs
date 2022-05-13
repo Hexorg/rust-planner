@@ -10,10 +10,11 @@ impl FromStr for Domain {
     type Err = ParserError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let domain = Domain{ast:Parser::parse(s)?};
+        let domain = Domain{ast:Parser::parse(s, None)?};
         let mut world_vars = HashSet::<&str>::new();
         let mut blackboard_vars = HashSet::<&str>::new();
         domain.ast.iter().for_each(|item| {
+            println!("{:?}", item);
             world_vars.extend(Domain::get_world_variables_from_stmt(item).iter());
             blackboard_vars.extend(Domain::get_blackboard_variables_from_stmt(item).iter());
         });

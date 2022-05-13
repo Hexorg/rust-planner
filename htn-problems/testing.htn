@@ -1,7 +1,8 @@
 task BeTrunkThumper:
     method Attack(WsCanSeeEnemy): # name(conditions)
         AttackEnemy()
-    else: # syntactic sugar for "method bla(!WsCanSeeEnemy)"
+    elsehi
+    
         ChooseBridgeToCheck()
         NavigateToBridge(sTanIsHere)
         CheckBridge()
