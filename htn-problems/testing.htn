@@ -1,9 +1,9 @@
 task BeTrunkThumper:
-    method (WsCanSeeEnemy): # name(conditions)
+    method Attack(WsCanSeeEnemy): # name(conditions)
         AttackEnemy()
     else: # syntactic sugar for "method bla(!WsCanSeeEnemy)"
         ChooseBridgeToCheck()
-        NavigateToBridge()
+        NavigateToBridge(sTanIsHere)
         CheckBridge()
 
 task AttackEnemy:
@@ -25,7 +25,7 @@ effects:
 
 
 task FindTrunk:
-    trunk = FindTrunkOperator() # Operator results can be stored in blackboard
+    trunk = FindTrunkOperator(StanIsHere) # Operator results can be stored in blackboard
 effects:
     foundTrunk = True # not needed if the sequence is always the same
 

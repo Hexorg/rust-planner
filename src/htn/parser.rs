@@ -1,6 +1,4 @@
-use std::{fmt, string::ParseError, rc::Rc};
-
-use super::domain::Domain;
+use std::{fmt, rc::Rc};
 
 pub struct ParserError {
     line: usize,
@@ -261,7 +259,7 @@ impl Lexer {
     }
 }
 #[derive(Clone, Debug)]
-enum Expr {
+pub enum Expr {
     Binary(Rc<Expr>, Token, Rc<Expr>), // left Token right
     Grouping(Rc<Expr>), // group of expressions
     Literal(i32),
@@ -272,7 +270,7 @@ enum Expr {
 }
 
 #[derive(Debug)]
-enum Stmt {
+pub enum Stmt {
     Method(String, Option<Expr>, Rc<Stmt>), // Name, condition, subtasks
     Task(String, Option<Expr>, Rc<Stmt>, Option<Rc<Stmt>>), // Name, condition, methods, effects
     Block(Vec<Stmt>),
@@ -474,7 +472,12 @@ impl Parser<'_> {
     fn block_statement(&mut self) -> Result<Stmt, ParserError> {
         let mut stmts = Vec::<Stmt>::new();
         loop {
-            stmts.push(self.statement()?);
+            let mut stmt = self.statement()?;
+            if let Stmt::Block(ref mut inner) = stmt {
+                stmts.append(inner);
+            } else {
+                stmts.push(stmt);
+            }
 
             if let TokenData::BLOCK_END | TokenData::EOF = self.tokens[self.idx].t {
                 self.idx += 1;
@@ -571,16 +574,17 @@ impl Parser<'_> {
             }
         ));
     }
-    pub fn parse(htn_source: &str) -> Result<Domain, ParserError> {
+    pub fn parse(htn_source: &str) -> Result<Vec<Stmt>, ParserError> {
         let tokens = &Lexer::tokenize(htn_source)?;
-        Parser::print_tokens(tokens);
+        // Parser::print_tokens(tokens);
         let mut parser = Parser{idx:0, tokens};
-        while parser.idx < tokens.len() {
+        let mut ast = Vec::<Stmt>::new();
+        while parser.idx + 1 < tokens.len() {
             match parser.statement() {
                 Err(e) => { eprintln!(">>> {}", e); parser.error_recover() },
-                Ok(s) => { println!("{:?}", s); }
+                Ok(s) => { ast.push(s); }
             }
         }
-        Ok(Domain{})
+        Ok(ast)
     }
 }
