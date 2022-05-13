@@ -115,9 +115,9 @@ pub struct Lexer {
 
 }
 
-pub struct Parser<'a> {
+pub struct Parser {
     idx: usize,
-    tokens: &'a Vec<Token>,
+    tokens: Vec<Token>,
 }
 
 impl Lexer {
@@ -322,7 +322,7 @@ macro_rules! ptest {
     }
 }
 
-impl Parser<'_> {
+impl Parser {
     fn error_recover(&mut self) {
         self.idx += 1;
         while self.idx + 1 < self.tokens.len() {
@@ -460,6 +460,7 @@ impl Parser<'_> {
     }
     fn task_statement(&mut self) -> Result<Stmt, ParserError> {
         pexpect!(self, TokenData::LABEL(name), {
+            let name = name.clone();
             let mut conditions : Option<Expr> = None;
             pmatch!(self, TokenData::OPEN_PAREN, {
                 conditions = Some(self.expression()?);
@@ -469,7 +470,7 @@ impl Parser<'_> {
                 let task_block = self.statement()?;
                 let mut effects_block = None;
                 pmatch!(self, TokenData::EFFECTS, {effects_block = Some(Rc::new(self.effects_statement()?));});
-                Ok(Stmt::Task(name.clone(), conditions, Rc::new(task_block), effects_block))
+                Ok(Stmt::Task(name, conditions, Rc::new(task_block), effects_block))
             }, "Expected ':' after task label.")
         }, "Expected label after 'task'.")
         
@@ -500,6 +501,7 @@ impl Parser<'_> {
     }
     fn method_statement(&mut self) -> Result<Stmt, ParserError> {
         pexpect!(self, TokenData::LABEL(name), {
+            let name = name.clone();
             let mut conditions: Option<Expr> = None;
             pmatch!(self, TokenData::OPEN_PAREN, {
                 conditions = Some(self.expression()?);
@@ -559,34 +561,33 @@ impl Parser<'_> {
             }
         ));
     }
-    pub fn parse(htn_source: &str, filename:Option<&str>) -> Result<Vec<Stmt>, ParserError> {
-        let tokens = &Lexer::tokenize(htn_source)?;
-        Parser::print_tokens(tokens);
-        let mut parser = Parser{idx:0, tokens};
-        let mut ast = Vec::<Stmt>::new();
+    pub fn print_parse_errors(errors: Vec<ParserError>, htn_source:&str, filepath:&str) {
         let mut lines = htn_source.lines();
         let mut last_error_line = 0;
-        while parser.idx + 1 < tokens.len() {
-            match parser.statement() {
-                Err(e) => { 
-                    if let Some(eline) = lines.nth(e.line - last_error_line-1) {
-                        let line_number_string = format!("{}", e.line);
-                        if let Some(f) = filename {
-                            eprintln!("{}:{} Error:", f, e.line); 
-                        } else {
-                            eprintln!("line:{} Error:", e.line); 
-                        }
-                        eprintln!("\t{}: {}", line_number_string, eline);
-                        last_error_line = e.line;
-                        let debug_str_col_pos = line_number_string.len() + 2 + e.col;
-                        eprintln!("\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos); 
-
-                        parser.error_recover(); 
-                    }
-                },
-                Ok(s) => { ast.push(s); }
+        for e in errors {
+            if let Some(eline) = lines.nth(e.line - last_error_line-1) {
+                let line_number_string = format!("{}", e.line);
+                eprintln!("{}:{} Error:", filepath, e.line); 
+                eprintln!("\t{}: {}", line_number_string, eline);
+                last_error_line = e.line;
+                let debug_str_col_pos = line_number_string.len() + 2 + e.col;
+                eprintln!("\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos); 
             }
         }
-        Ok(ast)
+    }
+    pub fn parse(htn_source: &str) -> (Vec<Stmt>, Vec<ParserError>) {
+        let mut ast = Vec::<Stmt>::new();
+        let mut errors = Vec::<ParserError>::new();
+        let mut parser = match Lexer::tokenize(htn_source) {
+            Ok(tokens) => Parser{idx:0, tokens},
+            Err(e) => { errors.push(e); return (ast, errors); }
+        };
+        while parser.idx + 1 < parser.tokens.len() {
+            match parser.statement() {
+                Err(e) =>errors.push(e),
+                Ok(s) => ast.push(s)
+            }
+        }
+        (ast, errors)
     }
 }
