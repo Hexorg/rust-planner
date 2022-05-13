@@ -289,6 +289,39 @@ pub enum Stmt {
     Expression(Expr)
 }
 
+macro_rules! pexpect {
+    ($s:expr, $p:pat, $do:block, $e:literal) => {
+        if let $p = &$s.tokens[$s.idx].t {
+            $s.idx += 1;
+            $do
+        } else {
+            let line = $s.tokens[$s.idx].line;
+            let col = $s.tokens[$s.idx].col;
+            Err(ParserError{line, col, message:String::from($e)})
+        }
+    }
+}
+
+macro_rules! pmatch {
+    ($s:expr, $p:pat, $do:block) => {
+        if let $p = &$s.tokens[$s.idx].t {
+            $s.idx += 1;
+            $do
+        } 
+    }
+}
+
+macro_rules! ptest {
+    ($s:expr, $p:pat, $do_match:block else $do_nomatch:block) => {
+        if let $p = &$s.tokens[$s.idx].t {
+            $s.idx += 1;
+            $do_match
+        } else {
+            $do_nomatch
+        }
+    }
+}
+
 impl Parser<'_> {
     fn error_recover(&mut self) {
         self.idx += 1;
@@ -304,30 +337,28 @@ impl Parser<'_> {
     }
     fn call(&mut self) -> Result<Expr, ParserError> {
         let expr = self.primary()?;
-        if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
-            self.idx += 1;
+        ptest!(self, TokenData::OPEN_PAREN, {
             let mut args = Vec::<Expr>::new();
             loop { 
-                if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
-                    self.idx += 1;
+                ptest!(self, TokenData::CLOSE_PAREN, {
                     break Ok(Expr::Call(Rc::new(expr), self.tokens[self.idx-1].clone(), args))
                 } else {
                     args.push(self.expression()?);
-                }
+                })
             }
         } else {
             Ok(expr)
-        }
+        })
+
     }
     fn unary(&mut self) -> Result<Expr, ParserError> {
-        if let TokenData::NOT | TokenData::MINUS = self.tokens[self.idx].t {
-            let operator = self.tokens[self.idx].clone();
-            self.idx += 1;
+        ptest!(self, (TokenData::NOT | TokenData::MINUS), {
+            let operator = self.tokens[self.idx-1].clone();
             let right = self.unary()?;
             Ok(Expr::Unary(operator, Rc::new(right)))
         } else {
             self.call()
-        }   
+        }) 
     }
     fn factor(&mut self) -> Result<Expr, ParserError> {
         let mut expr = self.unary()?;
@@ -371,12 +402,11 @@ impl Parser<'_> {
     }
     fn assignment(&mut self) -> Result<Expr, ParserError> {
         let target = self.equality()?;
-        if let TokenData::EQUALS 
+        ptest!(self, (TokenData::EQUALS 
             | TokenData::ADD_TO 
             | TokenData::SUBTRACT_FROM
             | TokenData::DIVIDE_BY
-            | TokenData::MULTIPLY_BY = self.tokens[self.idx].t {
-                self.idx += 1;
+            | TokenData::MULTIPLY_BY), {
                 if let Expr::Variable(varname) = &target {
                     let value_expr = match self.tokens[self.idx].t {
                         // TokenData::EQUALS => self.expression()?,
@@ -394,7 +424,7 @@ impl Parser<'_> {
                 }
         } else {
             Ok(target)
-        }
+        })
     }
     fn expression(&mut self) -> Result<Expr, ParserError> {
         self.assignment()
@@ -426,60 +456,30 @@ impl Parser<'_> {
 
     }
     fn effects_statement(&mut self) -> Result<Stmt, ParserError> {
-        if let TokenData::COLON = self.tokens[self.idx].t {
-            self.idx += 1;
-            self.statement()
-        } else {
-            let line = self.tokens[self.idx-1].line;
-            let col = self.tokens[self.idx-1].col + self.tokens[self.idx-1].len;
-            Err(ParserError{line, col, message:String::from("Expected ':' after 'effects'.")})
-        }
+        pexpect!(self, TokenData::COLON, {self.statement()}, "Expected ':' after 'effects'.")
     }
     fn task_statement(&mut self) -> Result<Stmt, ParserError> {
-        if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
-            self.idx += 1;
+        pexpect!(self, TokenData::LABEL(name), {
             let mut conditions : Option<Expr> = None;
-            if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
-                self.idx += 1;
+            pmatch!(self, TokenData::OPEN_PAREN, {
                 conditions = Some(self.expression()?);
-                if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
-                    self.idx += 1;
-                } else {
-                    let line = self.tokens[self.idx].line;
-                    let col = self.tokens[self.idx].col;
-                    return Err(ParserError{line, col, message:String::from("Expected ')' after task conditions.")})
-                }
-            }
-            if let TokenData::COLON = self.tokens[self.idx].t {
-                self.idx += 1;
+                pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after task conditions.")?
+            });
+            pexpect!(self, TokenData::COLON, {
                 let task_block = self.statement()?;
                 let mut effects_block = None;
-                if let TokenData::EFFECTS = self.tokens[self.idx].t {
-                    self.idx += 1;
-                    effects_block = Some(Rc::new(self.effects_statement()?));
-                }
+                pmatch!(self, TokenData::EFFECTS, {effects_block = Some(Rc::new(self.effects_statement()?));});
                 Ok(Stmt::Task(name.clone(), conditions, Rc::new(task_block), effects_block))
-            } else {
-                let line = self.tokens[self.idx].line;
-                let col = self.tokens[self.idx].col;
-                Err(ParserError{line, col, message:String::from("Expected ':' after task label.")})
-            }
-        } else {
-            let line = self.tokens[self.idx].line;
-            let col = self.tokens[self.idx].col;
-            Err(ParserError{line, col, message:String::from("Expected label after 'task'.")})
-        }
+            }, "Expected ':' after task label.")
+        }, "Expected label after 'task'.")
+        
     }
     fn expression_statement(&mut self) -> Result<Stmt, ParserError> {
         let expr = self.expression()?;
-        if let TokenData::STATEMENT_END | TokenData::BLOCK_START | TokenData::BLOCK_END  = self.tokens[self.idx].t {
-            self.idx += 1;
-            Ok(Stmt::Expression(expr))
-        } else {
-            let line = self.tokens[self.idx].line;
-            let col = self.tokens[self.idx].col;
-            Err(ParserError{line, col, message:String::from("Expected new line after expression.")})
-        }
+        pexpect!(self, 
+            (TokenData::STATEMENT_END | TokenData::BLOCK_START | TokenData::BLOCK_END), 
+            {Ok(Stmt::Expression(expr))}, 
+            "Expected new line after expression.")
     }
     fn block_statement(&mut self) -> Result<Stmt, ParserError> {
         let mut stmts = Vec::<Stmt>::new();
@@ -499,52 +499,25 @@ impl Parser<'_> {
         
     }
     fn method_statement(&mut self) -> Result<Stmt, ParserError> {
-        if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
-            self.idx += 1;
+        pexpect!(self, TokenData::LABEL(name), {
             let mut conditions: Option<Expr> = None;
-            if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
-                self.idx += 1;
-                if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
-                    self.idx += 1;
-                } else {
-                    conditions = Some(self.expression()?);
-                    if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
-                        self.idx += 1;
-                    } else {
-                        let line = self.tokens[self.idx].line;
-                        let col = self.tokens[self.idx].col;
-                        return Err(ParserError{line, col, message:String::from("Expected ')' after method conditions.'")})
-                    }
-                }
-            }
-            if let TokenData::COLON = self.tokens[self.idx].t {
-                self.idx += 1;
+            pmatch!(self, TokenData::OPEN_PAREN, {
+                conditions = Some(self.expression()?);
+                pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after method conditions.'")?;
+            });
+            pexpect!(self, TokenData::COLON, {
                 let parent_statemet = Stmt::Method(name.clone(), conditions.clone(), Rc::new(self.statement()?));
-                if let TokenData::ELSE = self.tokens[self.idx].t {
-                    self.idx += 1;
-                    if let TokenData::COLON = self.tokens[self.idx].t {
-                        self.idx += 1;
+                ptest!(self, TokenData::ELSE, {
+                    pexpect!(self, TokenData::COLON, {
                         let else_conditions = Expr::Unary(Token{line:0, col:0, len:0, t:TokenData::NOT}, Rc::new(conditions.unwrap()));
                         let else_statement = Stmt::Method(format!("Dont{}", name), Some(else_conditions), Rc::new(self.statement()?));
                         Ok(Stmt::Block(vec![parent_statemet, else_statement]))
-                    } else {
-                        let line = self.tokens[self.idx].line;
-                        let col = self.tokens[self.idx].col;
-                        return Err(ParserError{line, col, message:String::from("Expected ':' after method declaration.")})
-                    }
+                    }, "Expected ':' after else clause.")
                 } else {
                     Ok(parent_statemet)
-                }
-            } else {
-                let line = self.tokens[self.idx].line;
-                let col = self.tokens[self.idx].col;
-                return Err(ParserError{line, col, message:String::from("Expected ':' after method declaration.")})
-            }
-        } else {
-            let line = self.tokens[self.idx].line;
-            let col = self.tokens[self.idx].col;
-            Err(ParserError{line, col, message:String::from("Expected method name.")})
-        }
+                })
+            }, "Expected ':' after method declaration.")
+        }, "Expected method name.")
     }
     fn statement(&mut self) -> Result<Stmt, ParserError> {
         // println!("When Parsing a new statement, next token is {}.", self.tokens[self.idx]);

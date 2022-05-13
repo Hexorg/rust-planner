@@ -1,7 +1,7 @@
 task BeTrunkThumper:
     method Attack(WsCanSeeEnemy): # name(conditions)
         AttackEnemy()
-    elsehi
+    else:
     
         ChooseBridgeToCheck()
         NavigateToBridge(sTanIsHere)
@@ -12,7 +12,7 @@ task AttackEnemy:
         NavigateToEnemy()
         DoTrunkSlam()
 
-    method default():
+    method default:
         FindTrunk()
         NavigateToTrunk()
         UprootTrunk()

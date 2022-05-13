@@ -1,73 +1,81 @@
-use std::{str::FromStr, ops::Deref, collections::HashSet};
+use std::{fmt, str::FromStr, ops::Deref, collections::HashSet};
 
 use super::parser::{ParserError, Parser, Stmt, Expr};
 
 pub struct Domain {
     ast: Vec<Stmt>,
 }
+pub enum DomainParsingError {
+    Parser(ParserError),
+    Domain(DomainError)
+}
 
-impl FromStr for Domain {
-    type Err = ParserError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let domain = Domain{ast:Parser::parse(s, None)?};
-        let mut world_vars = HashSet::<&str>::new();
-        let mut blackboard_vars = HashSet::<&str>::new();
-        domain.ast.iter().for_each(|item| {
-            println!("{:?}", item);
-            world_vars.extend(Domain::get_world_variables_from_stmt(item).iter());
-            blackboard_vars.extend(Domain::get_blackboard_variables_from_stmt(item).iter());
-        });
-        println!("world_vars: {:?}", world_vars);
-        println!("blackboard_vars: {:?}", blackboard_vars);
-        Ok(domain)
+impl fmt::Debug for DomainParsingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parser(pe) => f.debug_tuple("Parser").field(arg0).finish(),
+            Self::Domain(de) => eprintln!("Error: {}", de.message),
+        }
     }
 }
 
+pub struct DomainError {
+    message: String,
+}
+
+impl FromStr for Domain {
+    type Err = DomainParsingError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Parser::parse(s, None) {
+            Ok(ast) => {Domain::rules_check(&ast); Ok(Domain{ast})},
+            Err(e) => Err(DomainParsingError::Parser(e))
+        }
+    }
+}
+
+enum TaskType {
+    COMPOSITE,
+    PRIMITIVE
+}
+
 impl Domain {
-    fn get_world_variables_from_expr<'a>(expr: &'a Expr) -> HashSet<&'a str> {
-        let mut r = HashSet::<&'a str>::new();
-        match expr {
-            Expr::Binary(left, _, right) => {r.extend(& mut Domain::get_world_variables_from_expr(left.deref()).iter()); r.extend(& mut Domain::get_world_variables_from_expr(right.deref()).iter())},
-            Expr::Grouping(e) => r.extend(& mut Domain::get_world_variables_from_expr(e.deref()).iter()),
-            Expr::Variable(var) => { r.insert(var.as_str()); } ,
-            Expr::Unary(_, right) => r.extend(& mut Domain::get_world_variables_from_expr(right.deref()).iter()),
-            Expr::Assignment(_, right) => r.extend(& mut Domain::get_world_variables_from_expr(right.deref()).iter()),
-            Expr::Call(_, _, vexp) => vexp.iter().for_each(|item| r.extend(& mut Domain::get_world_variables_from_expr(item).iter())),
-            _ => (),
+    fn check_task_validity(stmt:&Stmt) -> Result<(),DomainError> {
+        if let Stmt::Task(_, _, def, _) = stmt {
+            let mut task_type:Option<TaskType> = None;
+            match def.as_ref() {
+                Stmt::Block(blk) =>
+                    for substmt in blk {
+                        match substmt {
+                            Stmt::Method(_, _, _) => match task_type {
+                                Some(TaskType::PRIMITIVE) => { return Err(DomainError{message:String::from("Task can either have methods or call operators.")})},
+                                None => {task_type = Some(TaskType::COMPOSITE);},
+                                _ => ()
+                            },
+                            Stmt::Expression(e) => {
+                                if let Expr::Call(_, _, _) = e {
+                                    match task_type {
+                                        Some(TaskType::COMPOSITE) => { return Err(DomainError{message:String::from("Task can either have methods or call operators.")})},
+                                        None => {task_type = Some(TaskType::PRIMITIVE);},
+                                        _ => ()
+                                    }
+                                } else {
+                                    return Err(DomainError{message:String::from("Task can either have methods or call operators.")})
+                                }
+                            }
+                            _ => {return Err(DomainError{message:String::from("Task can either have methods or call operators.")})},
+                        }
+                    },
+                _ => (),
+            }
         }
-        r
+        Ok(())
     }
-    fn get_world_variables_from_stmt<'a>(stmt: &'a Stmt) -> HashSet<&'a str> {
-        let mut r = HashSet::<&'a str>::new();
-        match stmt {
-            Stmt::Method(_, Some(conditions), _) => r.extend(&mut Domain::get_world_variables_from_expr(conditions).iter()), 
-            Stmt::Task(_, cnd, imp, _) => {if let Some(conditions) = cnd { r.extend(&mut Domain::get_world_variables_from_expr(conditions).iter()); } r.extend(&mut Domain::get_world_variables_from_stmt(imp).iter())},
-            Stmt::Block(imp) => imp.iter().for_each(|item| r.extend(&mut Domain::get_world_variables_from_stmt(item).iter())),
-            _ => (),
+
+    fn rules_check(stmt:&Vec<Stmt>) -> Result<(),DomainError> {
+        for s in stmt {
+            Domain::check_task_validity(s)?;    
         }
-        r
-    }
-    fn get_blackboard_variables_from_expr<'a>(expr: &'a Expr) -> HashSet<&'a str> {
-        let mut r = HashSet::<&'a str>::new();
-        match expr {
-            Expr::Binary(left, _, right) => {r.extend(& mut Domain::get_blackboard_variables_from_expr(left.deref()).iter()); r.extend(& mut Domain::get_world_variables_from_expr(right.deref()).iter())},
-            Expr::Grouping(e) => r.extend(& mut Domain::get_blackboard_variables_from_expr(e.deref()).iter()),
-            Expr::Unary(_, right) => r.extend(& mut Domain::get_blackboard_variables_from_expr(right.deref()).iter()),
-            Expr::Assignment(var, _) => {r.insert(var.as_str());},
-            Expr::Call(_, _, vexp) => vexp.iter().for_each(|item| r.extend(& mut Domain::get_world_variables_from_expr(item).iter())),
-            _ => (),
-        }
-        r
-    }
-    fn get_blackboard_variables_from_stmt<'a>(stmt: &'a Stmt) -> HashSet<&'a str> {
-        let mut r = HashSet::<&'a str>::new();
-        match stmt {
-            Stmt::Task(_, _, imp, _) => { r.extend(&mut Domain::get_blackboard_variables_from_stmt(imp).iter())},
-            Stmt::Block(imp) => imp.iter().for_each(|item| r.extend(&mut Domain::get_blackboard_variables_from_stmt(item).iter())),
-            Stmt::Expression(e) => r.extend(Domain::get_blackboard_variables_from_expr(e).iter()),
-            _ => (),
-        }
-        r
+        Ok(())
     }
 }
