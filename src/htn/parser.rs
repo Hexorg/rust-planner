@@ -362,7 +362,7 @@ impl Parser {
     }
     fn factor(&mut self) -> Result<Expr, ParserError> {
         let mut expr = self.unary()?;
-        while let TokenData::SLASH | TokenData::STAR = self.tokens[self.idx].t {
+        while let TokenData::SLASH | TokenData::STAR | TokenData::AND = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.unary()?;
@@ -372,7 +372,7 @@ impl Parser {
     }
     fn term(&mut self) -> Result<Expr, ParserError> {
         let mut expr = self.factor()?;
-        while let TokenData::MINUS | TokenData::PLUS = self.tokens[self.idx].t {
+        while let TokenData::MINUS | TokenData::PLUS | TokenData::OR = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.factor()?;
@@ -437,14 +437,9 @@ impl Parser {
         } else if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
             self.idx += 1;
             let expr = self.expression()?;
-            if let TokenData::CLOSE_PAREN = self.tokens[self.idx].t {
-                self.idx += 1;
+            pexpect!(self, TokenData::CLOSE_PAREN, {
                 Ok(Expr::Grouping(Rc::new(expr)))
-            } else {
-                let line = self.tokens[self.idx].line;
-                let col = self.tokens[self.idx].col;
-                Err(ParserError{line, col, message:String::from("Expected ')' after expression.")})
-            }
+            }, "Expected ')' after expression.")
         } else if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
             self.idx += 1;
             Ok(Expr::Variable(name.clone()))
@@ -552,7 +547,7 @@ impl Parser {
                 } else if acc.ends_with('{') {
                     acc + &format!(" {}", item_string)
                 } else {
-                    acc + &format!("{}", item_string)
+                    acc + &format!("({}){}", item.col, item_string)
                 };
                 if let TokenData::BLOCK_END = item.t {
                     depth -= 1;
@@ -582,6 +577,7 @@ impl Parser {
             Ok(tokens) => Parser{idx:0, tokens},
             Err(e) => { errors.push(e); return (ast, errors); }
         };
+        Parser::print_tokens(&parser.tokens);
         while parser.idx + 1 < parser.tokens.len() {
             match parser.statement() {
                 Err(e) => {errors.push(e); parser.error_recover(); },
