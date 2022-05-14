@@ -584,7 +584,7 @@ impl Parser {
         };
         while parser.idx + 1 < parser.tokens.len() {
             match parser.statement() {
-                Err(e) =>errors.push(e),
+                Err(e) => {errors.push(e); parser.error_recover(); },
                 Ok(s) => ast.push(s)
             }
         }
