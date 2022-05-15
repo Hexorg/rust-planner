@@ -17,6 +17,10 @@ task AttackEnemy:
         UprootTrunk()
         AttackEnemy()
 
+task ChooseBridgeToCheck:
+    FakeGOTOEnemyBridge()
+effects:
+    WsCanSeeEnemy = 1
 
 task DoTrunkSlam:
     DoTrunkSlamOperator()
