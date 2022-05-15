@@ -198,25 +198,32 @@ impl Lexer {
                     if let Some(mut last_token) = r.last_mut() {
                         if let Token{t:TokenData::LABEL(label), ..} = last_token {
                             label.push(c);
-                            if let Some(next_char) = it.peek() {
+                            last_token.len += 1;
+                            if let Some(t) = if let Some(next_char) = it.peek() {
                                 if !next_char.is_alphanumeric() {
-                                    match label.as_str() { // if the label composes a keyword, replace with keyword
-                                        "task" => {last_token.t = TokenData::TASK; last_token.len = 4},
-                                        "method" => {last_token.t = TokenData::METHOD; last_token.len = 6},
-                                        "else" => {last_token.t = TokenData::ELSE; last_token.len = 4},
-                                        "effects" => {last_token.t = TokenData::EFFECTS; last_token.len = 7},
-                                        "or" => {last_token.t = TokenData::OR; last_token.len = 2},
-                                        "and" => {last_token.t = TokenData::AND; last_token.len = 3},
-                                        "not" => {last_token.t = TokenData::NOT; last_token.len = 3},
-                                        "false" => {last_token.t = TokenData::LITERAL(0); last_token.len = 4},
-                                        "true" => {last_token.t = TokenData::LITERAL(1); last_token.len = 4},
-                                        _ => {last_token.len = label.len()},
+                                    match label.clone().as_str() { // if the label composes a keyword, replace with keyword
+                                        "task" => Some(TokenData::TASK),
+                                        "method" => Some(TokenData::METHOD),
+                                        "else" => Some(TokenData::ELSE),
+                                        "effects" => Some(TokenData::EFFECTS),
+                                        "or" => Some(TokenData::OR),
+                                        "and" => Some(TokenData::AND),
+                                        "not" => Some(TokenData::NOT),
+                                        "false" => Some(TokenData::LITERAL(0)),
+                                        "true" => Some(TokenData::LITERAL(1)),
+                                        _ => if let Ok(literal) = label.parse::<i32>() {
+                                                Some(TokenData::LITERAL(literal))
+                                            } else { None },
                                     }
-                                }
+                                } else { None }
+                            } else { None } {
+                                last_token.t = t;
                             }
                         } else { // last token isn't a label so we're starting a new label or keyword
                             r.push(Token{line, col, len:1, t:TokenData::LABEL(String::from(c))})
                         }
+                        
+                        
                     } else {
                         r.push(Token{line, col, len:1, t:TokenData::LABEL(String::from(c))})
                     }
@@ -252,20 +259,17 @@ impl Lexer {
                     _ => (),
                 }
             }
-            if let Some(Token{t:TokenData::LABEL(label),..}) = r.last() { // Check if the label is actually a literal
-                if let Ok(literal) = label.parse::<i32>() {
-                    r.last_mut().unwrap().t = TokenData::LITERAL(literal);
-                }
-            }
         }
         // End of file. Finish off whatever blocks have been here
-        if last_block_tab_depth > 0 {
+        // if last_block_tab_depth > 0 {
+        if r.len() > 0 {
             r.push(Token{line, col, len:0, t:TokenData::STATEMENT_END});
-            while last_block_tab_depth > 0 {
-                r.push(Token{line, col, len:0, t:TokenData::BLOCK_END});
-                last_block_tab_depth -= 1;
-            }
         }
+        while last_block_tab_depth > 0 {
+            r.push(Token{line, col, len:0, t:TokenData::BLOCK_END});
+            last_block_tab_depth -= 1;
+            }
+        // }
         r.push(Token{line, col, len:0, t:TokenData::EOF});
         Ok(r)
     }
@@ -291,14 +295,20 @@ pub enum Stmt {
 
 macro_rules! pexpect {
     ($s:expr, $p:pat, $do:block, $e:literal) => {
-        if let $p = &$s.tokens[$s.idx].t {
-            $s.idx += 1;
-            $do
-        } else {
-            let line = $s.tokens[$s.idx].line;
-            let col = $s.tokens[$s.idx].col;
-            Err(ParserError{line, col, message:String::from($e)})
-        }
+        // if $s.idx + 1 < $s.tokens.len() {
+            if let $p = &$s.tokens[$s.idx].t {
+                $s.idx += 1;
+                $do
+            } else {
+                let line = $s.tokens[$s.idx].line;
+                let col = $s.tokens[$s.idx].col;
+                Err(ParserError{line, col, message:String::from($e)})
+            }
+        // } else {
+        //     let line = $s.tokens[$s.tokens.len()-1].line;
+        //     let col = $s.tokens[$s.tokens.len()-1].col + $s.tokens[$s.tokens.len()-1].len;
+        //     Err(ParserError{line, col, message:String::from("Unexpected end of file")})
+        // }
     }
 }
 
@@ -313,12 +323,12 @@ macro_rules! pmatch {
 
 macro_rules! ptest {
     ($s:expr, $p:pat, $do_match:block else $do_nomatch:block) => {
-        if let $p = &$s.tokens[$s.idx].t {
-            $s.idx += 1;
-            $do_match
-        } else {
-            $do_nomatch
-        }
+            if let $p = &$s.tokens[$s.idx].t {
+                $s.idx += 1;
+                $do_match
+            } else {
+                $do_nomatch
+            }
     }
 }
 
@@ -527,6 +537,10 @@ impl Parser {
         } else if let TokenData::METHOD = self.tokens[self.idx].t {
             self.idx += 1;
             self.method_statement()
+        } else if let TokenData::EOF = self.tokens[self.idx].t {
+            let line = self.tokens[self.idx].line;
+            let col = self.tokens[self.idx].col;
+            Err(ParserError{line, col, message:String::from("Reached the end of file")})
         } else {
             self.expression_statement()
         };
@@ -547,7 +561,7 @@ impl Parser {
                 } else if acc.ends_with('{') {
                     acc + &format!(" {}", item_string)
                 } else {
-                    acc + &format!("({}){}", item.col, item_string)
+                    acc + &format!("{}", item_string)
                 };
                 if let TokenData::BLOCK_END = item.t {
                     depth -= 1;
