@@ -277,7 +277,7 @@ impl Lexer {
 #[derive(Clone, Debug)]
 pub enum Expr {
     Binary(Rc<Expr>, Token, Rc<Expr>), // left Token right
-    Grouping(Rc<Expr>), // group of expressions
+    Grouping(Rc<Expr>), // e.g. '(' expression ')'
     Literal(i32),
     Variable(String),
     Unary(Token, Rc<Expr>), // Token right
@@ -295,20 +295,27 @@ pub enum Stmt {
 
 macro_rules! pexpect {
     ($s:expr, $p:pat, $do:block, $e:literal) => {
-        // if $s.idx + 1 < $s.tokens.len() {
-            if let $p = &$s.tokens[$s.idx].t {
-                $s.idx += 1;
-                $do
-            } else {
-                let line = $s.tokens[$s.idx].line;
-                let col = $s.tokens[$s.idx].col;
-                Err(ParserError{line, col, message:String::from($e)})
-            }
-        // } else {
-        //     let line = $s.tokens[$s.tokens.len()-1].line;
-        //     let col = $s.tokens[$s.tokens.len()-1].col + $s.tokens[$s.tokens.len()-1].len;
-        //     Err(ParserError{line, col, message:String::from("Unexpected end of file")})
-        // }
+        if let $p = &$s.tokens[$s.idx].t {
+            $s.idx += 1;
+            $do
+        } else {
+            let line = $s.tokens[$s.idx].line;
+            let col = $s.tokens[$s.idx].col;
+            Err(ParserError{line, col, message:String::from($e)})
+        }
+    }
+}
+
+macro_rules! pexpect_prevtoken {
+    ($s:expr, $p:pat, $do:block, $e:literal) => {
+        if let $p = &$s.tokens[$s.idx].t {
+            $s.idx += 1;
+            $do
+        } else {
+            let line = $s.tokens[$s.idx-1].line;
+            let col = $s.tokens[$s.idx-1].col + $s.tokens[$s.idx-1].len - 1;
+            Err(ParserError{line, col, message:String::from($e)})
+        }
     }
 }
 
@@ -336,10 +343,7 @@ impl Parser {
     fn error_recover(&mut self) {
         self.idx += 1;
         while self.idx + 1 < self.tokens.len() {
-            if let TokenData::STATEMENT_END = self.tokens[self.idx-1].t {
-                return;
-            }
-            if let TokenData::TASK | TokenData::METHOD = self.tokens[self.idx].t {
+            if let TokenData::TASK = self.tokens[self.idx].t {
                 return;
             }
             self.idx += 1;
@@ -461,7 +465,7 @@ impl Parser {
 
     }
     fn effects_statement(&mut self) -> Result<Stmt, ParserError> {
-        pexpect!(self, TokenData::COLON, {self.statement()}, "Expected ':' after 'effects'.")
+        pexpect_prevtoken!(self, TokenData::COLON, {self.statement()}, "Expected ':' after 'effects'.")
     }
     fn task_statement(&mut self) -> Result<Stmt, ParserError> {
         pexpect!(self, TokenData::LABEL(name), {
@@ -471,7 +475,7 @@ impl Parser {
                 conditions = Some(self.expression()?);
                 pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after task conditions.")?
             });
-            pexpect!(self, TokenData::COLON, {
+            pexpect_prevtoken!(self, TokenData::COLON, {
                 let task_block = self.statement()?;
                 let mut effects_block = None;
                 pmatch!(self, TokenData::EFFECTS, {effects_block = Some(Rc::new(self.effects_statement()?));});
@@ -512,7 +516,7 @@ impl Parser {
                 conditions = Some(self.expression()?);
                 pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after method conditions.'")?;
             });
-            pexpect!(self, TokenData::COLON, {
+            pexpect_prevtoken!(self, TokenData::COLON, {
                 let parent_statemet = Stmt::Method(name.clone(), conditions.clone(), Rc::new(self.statement()?));
                 ptest!(self, TokenData::ELSE, {
                     pexpect!(self, TokenData::COLON, {
