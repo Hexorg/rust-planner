@@ -59,7 +59,7 @@ pub struct Token {
     col: usize,
     len: usize,
     // tab_depth: usize,
-    t: TokenData,
+    pub t: TokenData,
 }
 
 impl fmt::Display for Token {

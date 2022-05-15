@@ -1,4 +1,4 @@
-task BeTrunkThumper:
+task main:
     method Attack(WsCanSeeEnemy): # name(conditions)
         AttackEnemy()
     else: # syntactic sugar for "method bla(!WsCanSeeEnemy)"

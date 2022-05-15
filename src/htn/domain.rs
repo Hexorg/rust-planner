@@ -3,7 +3,8 @@ use std::{fs, fmt};
 use super::parser::{Parser, Stmt, Expr};
 
 pub struct Domain {
-    ast: Vec<Stmt>,
+    pub ast: Vec<Stmt>,
+    pub main_id: usize,
 }
 
 pub struct DomainError {
@@ -61,11 +62,24 @@ impl Domain {
         Ok(())
     }
 
+    fn find_main(stmt:&Vec<Stmt>) -> Result<usize,DomainError> {
+        for (i, s) in stmt.iter().enumerate() {
+            if let Stmt::Task(name, _,_,_) = &s {
+                match name.as_str() {
+                    "main" => return Ok(i),
+                    _ => (),
+                }
+            } 
+        }
+        Err(DomainError{message:String::from("Task 'main' not found.")})
+    }
+
     pub fn from_file(filepath:&str) -> Result<Domain, DomainError> {
         let htn_source = fs::read_to_string(filepath).expect("File error:");
         let (ast, errors) = Parser::parse(htn_source.as_str());
         Parser::print_parse_errors(errors, htn_source.as_str(), filepath);
         Domain::rules_check(&ast)?;
-        Ok(Domain{ast})
+        let main_id = Domain::find_main(&ast)?;
+        Ok(Domain{ast, main_id})
     }
 }
