@@ -1,4 +1,4 @@
-use std::{fmt, rc::Rc};
+use std::{fmt, rc::Rc, convert::TryInto};
 
 pub struct ParserError {
     line: usize,
@@ -220,7 +220,20 @@ impl Lexer {
                                 last_token.t = t;
                             }
                         } else { // last token isn't a label so we're starting a new label or keyword
-                            r.push(Token{line, col, len:1, t:TokenData::LABEL(String::from(c))})
+                            if let Some(next_char) = it.peek() {
+                                if !next_char.is_alphanumeric() {
+                                    if let Some(digit) = c.to_digit(10) {
+                                        r.push(Token{line, col, len:1, t:TokenData::LITERAL(digit.try_into().unwrap())})
+                                    } else {
+                                        r.push(Token{line, col, len:1, t:TokenData::LABEL(String::from(c))})
+                                    }
+                                } else {
+                                    r.push(Token{line, col, len:1, t:TokenData::LABEL(String::from(c))})
+                                }
+                            } else {
+                                r.push(Token{line, col, len:1, t:TokenData::LABEL(String::from(c))})
+                            }
+                            
                         }
                         
                         

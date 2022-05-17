@@ -12,13 +12,14 @@ pub struct Planner<'a> {
 enum ExpressionResult {
     Literal(i32), 
     Task(String),
+    Variable(String),
     FunctionCall(String)
 }
 
 impl Planner<'_>{
 
     fn run_task(&mut self, name:&str, conditions:&Option<Expr>, definition:&Stmt, effects:Option<&Rc<Stmt>>) {
-        // println!("Running task {}", name);
+        println!("Running task {}", name);
         if let Some(cnd) = conditions {
             if let ExpressionResult::Literal(1) = self.run_expr(&cnd) {
                 // println!("Task {} meeds conditions", name);
@@ -60,8 +61,9 @@ impl Planner<'_>{
                 lit
             } else {
                 0
-            }
-            _ => panic!(),
+            },
+            Expr::Literal(l) => *l,
+            _ => panic!(format!("Unexpected expression {:?}", expr)),
         }
     }
     fn run_expr(&mut self, expr:&Expr) -> ExpressionResult {
@@ -76,22 +78,24 @@ impl Planner<'_>{
                 } else if let Some(_) = self.tasks.get(var.as_str()) {
                     ExpressionResult::Task(var.clone())
                 } else {
-                    ExpressionResult::FunctionCall(var.clone())
+                    ExpressionResult::Variable(var.clone())
                 }
             },
             Expr::Assignment(var, e) => {let val = self.run_expr(e.deref()); match &val {
                 ExpressionResult::Literal(lit) => {self.state.insert(var.to_string(), *lit);},
-                ExpressionResult::FunctionCall(func) => println!("Storing function call {} result to blackboard as {}", func, var),
+                ExpressionResult::FunctionCall(func) => println!("\tStoring function call {} result to blackboard as {}", func, var),
+                ExpressionResult::Variable(var) => panic!(format!("Unknown variable {}", var)),
                 ExpressionResult::Task(_) => panic!("Tasks don't have results and can't be assigned"),
             } val},
             Expr::Call(target, _, args) => { let a = args.iter().map(|item| self.run_expr(item)); 
                 let target = self.run_expr(target.deref());
                 match target {
                     ExpressionResult::Literal(_) => panic!("Can't call a literal"),
-                    ExpressionResult::Task(s) => self.run_stmt(self.tasks.get(&s).unwrap()),
-                    ExpressionResult::FunctionCall(func) => println!("Calling function {}()", func),
+                    ExpressionResult::Task(s) => {self.run_stmt(self.tasks.get(&s).unwrap()); ExpressionResult::Literal(0)},
+                    ExpressionResult::Variable(func) => {println!("\tCalling function {}({:?})", func, args); ExpressionResult::FunctionCall(func.clone())},
+                    ExpressionResult::FunctionCall(func) => panic!(format!("Can't call result of a function call {}", func)),
                 }
-                ExpressionResult::Literal(0)},
+                },
             
         }
         
@@ -103,7 +107,7 @@ impl Planner<'_>{
             Stmt::Task(name, conditions, definition, effects) => self.run_task(name, conditions, definition.deref(), effects.as_ref()),
             Stmt::Block(stmt_list) => {
                 let mut  sat_methods = Vec::< Rc<Stmt> >::new();
-                if stmt_list.iter().all(|item| if let Stmt::Method(_,cnd,def) = item { if cnd.is_some() { if let ExpressionResult::Literal(1) = self.run_expr(cnd.as_ref().unwrap()) { sat_methods.push(def.clone()); }} true } else { false}) {
+                if stmt_list.iter().all(|item| if let Stmt::Method(_,cnd,def) = item { if cnd.is_some() { if let ExpressionResult::Literal(1) = self.run_expr(cnd.as_ref().unwrap()) { sat_methods.push(def.clone()); }} else {sat_methods.push(def.clone());} true } else { false}) {
                     // if here, we need to choose one method to run
                     self.run_stmt(sat_methods.get(0).unwrap().deref()); // TODO: Choose a random method
                 } else {
@@ -123,7 +127,9 @@ impl Planner<'_>{
     pub fn run<'a>(domain: &'a Domain) {
         let mut tasks = HashMap::new();
         domain.ast.iter().for_each(|item| if let Stmt::Task(name, _,_,_) = item {tasks.insert(name.to_string(), item);});
-        let mut planner = Planner{main_id: domain.main_id, state:HashMap::new(), tasks};
+        let mut state = HashMap::new();
+        state.insert(String::from("WsCanSeeEnemy"), 0);
+        let mut planner = Planner{main_id: domain.main_id, state, tasks};
         planner.run_stmt(domain.ast.get(planner.main_id).unwrap());
     }
 }

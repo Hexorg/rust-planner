@@ -2,7 +2,7 @@ task main:
     method Attack(WsCanSeeEnemy): # name(conditions)
         AttackEnemy()
     else: # syntactic sugar for "method bla(!WsCanSeeEnemy)"
-        ChooseBridgeToCheck()
+        bridge = ChooseBridgeToCheck()
         NavigateToBridge()
         CheckBridge()
 
@@ -17,10 +17,13 @@ task AttackEnemy:
         UprootTrunk()
         AttackEnemy()
 
-task ChooseBridgeToCheck:
-    FakeGOTOEnemyBridge()
+task NavigateToBridge:
+    NavigateTo(bridge)
 effects:
     WsCanSeeEnemy = 1
+
+task CheckBridge:
+    main()
 
 task DoTrunkSlam:
     DoTrunkSlamOperator()
@@ -31,7 +34,7 @@ effects:
 task FindTrunk:
     trunk = FindTrunkOperator() # Operator results can be stored in blackboard
 effects:
-    foundTrunk = True # not needed if the sequence is always the same
+    foundTrunk = true # not needed if the sequence is always the same
 
 task NavigateToEnemy:
     NavigateTo(enemy) # blackboard is prefilled with certain knowledge
@@ -40,7 +43,7 @@ task NavigateToEnemy:
 task NavigateToTrunk(foundTrunk):
     NavigateTo(trunk)
 effects:
-    atTrunk = True
+    atTrunk = true
 
 
 task UprootTrunk(atTrunk):
