@@ -92,7 +92,7 @@ impl Planner<'_>{
                 match target {
                     ExpressionResult::Literal(_) => panic!("Can't call a literal"),
                     ExpressionResult::Task(s) => {self.run_stmt(self.tasks.get(&s).unwrap()); ExpressionResult::Literal(0)},
-                    ExpressionResult::Variable(func) => {println!("\tCalling function {}({:?})", func, args); ExpressionResult::FunctionCall(func.clone())},
+                    ExpressionResult::Variable(func) => {if self.tasks.contains_key(&func) { ExpressionResult::Task(func.clone())} else { println!("\tCalling function {}({:?})", func, args); ExpressionResult::FunctionCall(func.clone())}},
                     ExpressionResult::FunctionCall(func) => panic!(format!("Can't call result of a function call {}", func)),
                 }
                 },
@@ -107,9 +107,24 @@ impl Planner<'_>{
             Stmt::Task(name, conditions, definition, effects) => self.run_task(name, conditions, definition.deref(), effects.as_ref()),
             Stmt::Block(stmt_list) => {
                 let mut  sat_methods = Vec::< Rc<Stmt> >::new();
-                if stmt_list.iter().all(|item| if let Stmt::Method(_,cnd,def) = item { if cnd.is_some() { if let ExpressionResult::Literal(1) = self.run_expr(cnd.as_ref().unwrap()) { sat_methods.push(def.clone()); }} else {sat_methods.push(def.clone());} true } else { false}) {
+                if stmt_list.iter().all(|item| if let Stmt::Method(_,cnd,def) = item { 
+                        if cnd.is_some() { 
+                            if let ExpressionResult::Literal(1) = self.run_expr(cnd.as_ref().unwrap()) { 
+                                sat_methods.push(def.clone()); 
+                            }
+                        } else {
+                            sat_methods.push(def.clone());
+                        } 
+                        true 
+                    } else { 
+                        false
+                    }) {
                     // if here, we need to choose one method to run
-                    self.run_stmt(sat_methods.get(0).unwrap().deref()); // TODO: Choose a random method
+                    if sat_methods.len() > 0 {
+                        self.run_stmt(sat_methods.get(0).unwrap().deref()); // TODO: Choose a random metho
+                    } else {
+                        todo!("if we're here, we need to run a method, but none of them can be run right now. Find how to enable them.")
+                    }
                 } else {
                     // if here we need to run the whole block
                     for s in stmt_list {
@@ -117,7 +132,10 @@ impl Planner<'_>{
                     }
                 }
             }
-            Stmt::Expression(expr) => {self.run_expr(expr);},
+            Stmt::Expression(expr) => { match self.run_expr(expr) {
+                ExpressionResult::Task(t) => self.run_stmt(self.tasks.get(&t).unwrap()),
+                _ => (),
+            }},
         }
 
     }
@@ -128,7 +146,7 @@ impl Planner<'_>{
         let mut tasks = HashMap::new();
         domain.ast.iter().for_each(|item| if let Stmt::Task(name, _,_,_) = item {tasks.insert(name.to_string(), item);});
         let mut state = HashMap::new();
-        state.insert(String::from("WsCanSeeEnemy"), 0);
+        state.insert(String::from("isHungry"), 1);
         let mut planner = Planner{main_id: domain.main_id, state, tasks};
         planner.run_stmt(domain.ast.get(planner.main_id).unwrap());
     }

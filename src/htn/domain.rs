@@ -1,11 +1,7 @@
-use std::{fs, fmt};
+use std::{fs, fmt, rc::{Weak, Rc}};
+use core::slice::Iter;
+use super::{parser::{Parser, Stmt, Expr}, search::LinkedNode};
 
-use super::parser::{Parser, Stmt, Expr};
-
-pub struct Domain {
-    pub ast: Vec<Stmt>,
-    pub main_id: usize,
-}
 
 pub struct DomainError {
     message: String,
@@ -20,6 +16,35 @@ impl fmt::Debug for DomainError {
 enum TaskType {
     COMPOSITE,
     PRIMITIVE
+}
+
+struct Task {
+    t: TaskType,
+    stmt:Rc<Stmt>,
+    neighbors: Vec<Rc<Task>>
+}
+
+struct TaskIterator<'a> {
+    iter: Iter<'a, Rc<Task>>
+}
+
+impl<'a> Iterator for TaskIterator<'a> {
+    type Item = &'a Rc<Task>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
+impl<'a> LinkedNode<'a, Task, TaskIterator<'a>> for Task {
+    fn neighbors(&self) -> TaskIterator {
+        TaskIterator{iter:self.neighbors.iter()}
+    }
+}
+
+pub struct Domain {
+    pub tasks: Vec<Task>,
+    pub main_id: usize,
 }
 
 impl Domain {
@@ -66,7 +91,7 @@ impl Domain {
         for (i, s) in stmt.iter().enumerate() {
             if let Stmt::Task(name, _,_,_) = &s {
                 match name.as_str() {
-                    "main" => return Ok(i),
+                    "Main" => return Ok(i),
                     _ => (),
                 }
             } 
