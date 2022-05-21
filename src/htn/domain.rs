@@ -85,10 +85,12 @@ impl Domain {
         if context.is_some() {
             return Err(DomainError{message:format!("Nested task definition is not allowed.")});
         }
+        self.tasks.insert(name.clone());
+        self.operators.remove(name);
         let mut build_context = Some(BuildContext::Task(name.clone(), None));
         self.process_stmt(&mut build_context, body)?;
         if let Some(BuildContext::Task(tname, Some(t))) = build_context {
-            self.tasks.insert(name.clone());
+            // todo!("Set task type")
         } else {
             return Err(DomainError{message:format!("Task build context got overwritten")});
         }
