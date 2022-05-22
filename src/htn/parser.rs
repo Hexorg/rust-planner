@@ -289,19 +289,19 @@ impl Lexer {
 }
 #[derive(Clone, Debug)]
 pub enum Expr {
-    Binary(Rc<Expr>, Token, Rc<Expr>), // left Token right
-    Grouping(Rc<Expr>), // e.g. '(' expression ')'
+    Binary(Box<Expr>, Token, Box<Expr>), // left Token right
+    Grouping(Box<Expr>), // e.g. '(' expression ')'
     Literal(i32),
     Variable(String),
-    Unary(Token, Rc<Expr>), // Token right
-    Assignment(String, Rc<Expr>), // name, value
-    Call(Rc<Expr>, Token, Vec<Expr>) // callee expr, closing parenthesis token, args
+    Unary(Token, Box<Expr>), // Token right
+    Assignment(String, Box<Expr>), // name, value
+    Call(Box<Expr>, Token, Vec<Expr>) // callee expr, closing parenthesis token, args
 }
 
 #[derive(Debug)]
 pub enum Stmt {
-    Method(String, Option<Expr>, Rc<Stmt>), // Name, condition, subtasks
-    Task(String, Option<Expr>, Rc<Stmt>, Option<Rc<Stmt>>), // Name, condition, methods, effects
+    Method(String, Option<Expr>, Box<Stmt>), // Name, condition, subtasks
+    Task(String, Option<Expr>, Box<Stmt>, Option<Box<Stmt>>), // Name, condition, methods, effects
     Block(Vec<Stmt>),
     Expression(Expr)
 }
@@ -368,7 +368,7 @@ impl Parser {
             let mut args = Vec::<Expr>::new();
             loop { 
                 ptest!(self, TokenData::CLOSE_PAREN, {
-                    break Ok(Expr::Call(Rc::new(expr), self.tokens[self.idx-1].clone(), args))
+                    break Ok(Expr::Call(Box::new(expr), self.tokens[self.idx-1].clone(), args))
                 } else {
                     args.push(self.expression()?);
                 })
@@ -382,7 +382,7 @@ impl Parser {
         ptest!(self, (TokenData::NOT | TokenData::MINUS), {
             let operator = self.tokens[self.idx-1].clone();
             let right = self.unary()?;
-            Ok(Expr::Unary(operator, Rc::new(right)))
+            Ok(Expr::Unary(operator, Box::new(right)))
         } else {
             self.call()
         }) 
@@ -393,7 +393,7 @@ impl Parser {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.unary()?;
-            expr = Expr::Binary(Rc::new(expr), operator, Rc::new(right));
+            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
         Ok(expr)
     }
@@ -403,7 +403,7 @@ impl Parser {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.factor()?;
-            expr = Expr::Binary(Rc::new(expr), operator, Rc::new(right));
+            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
         Ok(expr)
     }
@@ -413,7 +413,7 @@ impl Parser {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.term()?;
-            expr = Expr::Binary(Rc::new(expr), operator, Rc::new(right));
+            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
         Ok(expr)
     }
@@ -423,7 +423,7 @@ impl Parser {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.comparison()?;
-            expr = Expr::Binary(Rc::new(expr), operator, Rc::new(right));
+            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
         Ok(expr)
     }
@@ -437,13 +437,13 @@ impl Parser {
                 if let Expr::Variable(varname) = &target {
                     let value_expr = match self.tokens[self.idx].t {
                         // TokenData::EQUALS => self.expression()?,
-                        TokenData::ADD_TO => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::PLUS}, Rc::new(self.expression()?)),
-                        TokenData::SUBTRACT_FROM => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::MINUS}, Rc::new(self.expression()?)),
-                        TokenData::MULTIPLY_BY => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::STAR}, Rc::new(self.expression()?)),
-                        TokenData::DIVIDE_BY => Expr::Binary(Rc::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::SLASH}, Rc::new(self.expression()?)),
+                        TokenData::ADD_TO => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::PLUS}, Box::new(self.expression()?)),
+                        TokenData::SUBTRACT_FROM => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::MINUS}, Box::new(self.expression()?)),
+                        TokenData::MULTIPLY_BY => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::STAR}, Box::new(self.expression()?)),
+                        TokenData::DIVIDE_BY => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::SLASH}, Box::new(self.expression()?)),
                         _ => self.expression()?,
                     };
-                    Ok(Expr::Assignment(varname.clone(), Rc::new(value_expr)))
+                    Ok(Expr::Assignment(varname.clone(), Box::new(value_expr)))
                 } else {
                     let line = self.tokens[self.idx].line;
                     let col = self.tokens[self.idx].col;
@@ -465,7 +465,7 @@ impl Parser {
             self.idx += 1;
             let expr = self.expression()?;
             pexpect!(self, TokenData::CLOSE_PAREN, {
-                Ok(Expr::Grouping(Rc::new(expr)))
+                Ok(Expr::Grouping(Box::new(expr)))
             }, "Expected ')' after expression.")
         } else if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
             self.idx += 1;
@@ -491,8 +491,8 @@ impl Parser {
             pexpect_prevtoken!(self, TokenData::COLON, {
                 let task_block = self.statement()?;
                 let mut effects_block = None;
-                pmatch!(self, TokenData::EFFECTS, {effects_block = Some(Rc::new(self.effects_statement()?));});
-                Ok(Stmt::Task(name, conditions, Rc::new(task_block), effects_block))
+                pmatch!(self, TokenData::EFFECTS, {effects_block = Some(Box::new(self.effects_statement()?));});
+                Ok(Stmt::Task(name, conditions, Box::new(task_block), effects_block))
             }, "Expected ':' after task label.")
         }, "Expected label after 'task'.")
         
@@ -530,11 +530,11 @@ impl Parser {
                 pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after method conditions.'")?;
             });
             pexpect_prevtoken!(self, TokenData::COLON, {
-                let parent_statemet = Stmt::Method(name.clone(), conditions.clone(), Rc::new(self.statement()?));
+                let parent_statemet = Stmt::Method(name.clone(), conditions.clone(), Box::new(self.statement()?));
                 ptest!(self, TokenData::ELSE, {
                     pexpect!(self, TokenData::COLON, {
-                        let else_conditions = Expr::Unary(Token{line:0, col:0, len:0, t:TokenData::NOT}, Rc::new(conditions.unwrap()));
-                        let else_statement = Stmt::Method(format!("Dont{}", name), Some(else_conditions), Rc::new(self.statement()?));
+                        let else_conditions = Expr::Unary(Token{line:0, col:0, len:0, t:TokenData::NOT}, Box::new(conditions.unwrap()));
+                        let else_statement = Stmt::Method(format!("Dont{}", name), Some(else_conditions), Box::new(self.statement()?));
                         Ok(Stmt::Block(vec![parent_statemet, else_statement]))
                     }, "Expected ':' after else clause.")
                 } else {

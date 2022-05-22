@@ -13,57 +13,40 @@ impl fmt::Debug for DomainError {
     }
 }
 
-enum TaskType {
-    COMPOSITE,
-    PRIMITIVE
+
+struct Task<'a> {
+    ast:Stmt,
+    neighbors: Vec<&'a Task<'a>>
 }
 
-struct Task {
-    t: TaskType,
-    name:String,
-    preconditions:Option<Expr>, 
-    body:Rc<Stmt>, 
-    effects:Option<Rc<Stmt>>,
-    neighbors: Vec<Rc<Task>>
-}
-
-impl Hash for Task {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state)
-    }
-}
-
-impl std::cmp::PartialEq for Task {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-
-impl std::cmp::Eq for Task {
-
-}
 
 struct TaskIterator<'a> {
-    iter: Iter<'a, Rc<Task>>
+    iter: Iter<'a, &'a Task<'a>>
 }
 
 impl<'a> Iterator for TaskIterator<'a> {
-    type Item = &'a Rc<Task>;
+    type Item = &'a &'a Task<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next()
     }
 }
 
-impl<'a> LinkedNode<'a, Task, TaskIterator<'a>> for Task {
+impl<'a> LinkedNode<'a, Task<'a>, TaskIterator<'a>> for Task<'a> {
     fn neighbors(&self) -> TaskIterator {
         TaskIterator{iter:self.neighbors.iter()}
+        
     }
 }
 
 enum ExpressionType {
     Call(String),
     Assignment(String)
+}
+
+enum TaskType {
+    Primitive,
+    Composite,
 }
 
 enum BuildContext {
@@ -81,7 +64,7 @@ pub struct Domain {
 }
 
 impl Domain {
-    fn build_task(&mut self, context: &mut Option<BuildContext>, name:&String, preconditions:&Option<Expr>, body:&Rc<Stmt>, effects:&Option<Rc<Stmt>>) -> Result<(), DomainError>  {
+    fn build_task(&mut self, context: &mut Option<BuildContext>, name:&String, preconditions:&Option<Expr>, body:&Box<Stmt>, effects:&Option<Box<Stmt>>) -> Result<(), DomainError>  {
         if context.is_some() {
             return Err(DomainError{message:format!("Nested task definition is not allowed.")});
         }
@@ -90,7 +73,13 @@ impl Domain {
         let mut build_context = Some(BuildContext::Task(name.clone(), None));
         self.process_stmt(&mut build_context, body)?;
         if let Some(BuildContext::Task(tname, Some(t))) = build_context {
-            // todo!("Set task type")
+            if &tname != name {
+                return Err(DomainError{message:format!("Task build context got overwritten")});
+            }
+            if let TaskType::Primitive = t {
+                // Task::Primitive{}
+            }
+
         } else {
             return Err(DomainError{message:format!("Task build context got overwritten")});
         }
@@ -103,11 +92,11 @@ impl Domain {
         Ok(())
 
     }
-    fn build_method(&mut self, context: &mut Option<BuildContext>, name:&String, preconditions:&Option<Expr>, body:&Rc<Stmt>) -> Result<(), DomainError>  {
+    fn build_method(&mut self, context: &mut Option<BuildContext>, name:&String, preconditions:&Option<Expr>, body:&Box<Stmt>) -> Result<(), DomainError>  {
         if let Some(BuildContext::Task(task_name, task_type)) = context {
             match task_type {
-                Some(TaskType::PRIMITIVE) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
-                None => *task_type = Some(TaskType::COMPOSITE),
+                Some(TaskType::Primitive) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
+                None => *task_type = Some(TaskType::Composite),
                 _ => (),
             }
         } else {
@@ -121,8 +110,8 @@ impl Domain {
         use BuildContext::*;
         if let Some(Task(task_name, task_type)) = context {
             match task_type {
-                Some(TaskType::COMPOSITE) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
-                None => *task_type = Some(TaskType::PRIMITIVE),
+                Some(TaskType::Composite) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
+                None => *task_type = Some(TaskType::Primitive),
                 _ => (),
             }
         }
@@ -164,10 +153,10 @@ impl Domain {
         }
     }
 
-    fn pass(&mut self, ast:Vec<Stmt>) -> Result<(), DomainError> {
+    fn pass(&mut self, ast:&Vec<Stmt>) -> Result<(), DomainError> {
         let mut build_context = None;
         for stmt in ast {
-            self.process_stmt(&mut build_context, &stmt)?;
+            self.process_stmt(&mut build_context, stmt)?;
         }
         Ok(())
     }
@@ -177,7 +166,7 @@ impl Domain {
         let (ast, errors) = Parser::parse(htn_source.as_str());
         Parser::print_parse_errors(errors, htn_source.as_str(), filepath);
         let mut domain = Domain{ tasks:HashSet::new(), world_variables:HashSet::new(), blackboard_variables:HashSet::new(), operators:HashSet::new()};
-        domain.pass(ast)?;
+        domain.pass(&ast)?;
         println!("{:?}", domain);
         Ok(domain)
     }
