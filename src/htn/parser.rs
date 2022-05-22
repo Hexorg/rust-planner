@@ -298,7 +298,7 @@ pub enum Expr {
     Call(Box<Expr>, Token, Vec<Expr>) // callee expr, closing parenthesis token, args
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Stmt {
     Method(String, Option<Expr>, Box<Stmt>), // Name, condition, subtasks
     Task(String, Option<Expr>, Box<Stmt>, Option<Box<Stmt>>), // Name, condition, methods, effects
