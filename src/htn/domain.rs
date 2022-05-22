@@ -21,11 +21,11 @@ pub enum TaskStatement {
 
 #[derive(Debug, Clone)]
 pub struct Task {
-    preconditions:Option<Expr>, 
-    dependencies:HashSet<String>,
-    body:TaskStatement, 
-    effects:Vec<Expr>,
-    affects:HashSet<String>,
+    pub preconditions:Option<Expr>, 
+    pub dependencies:HashSet<String>,
+    pub body:TaskStatement, 
+    pub effects:Vec<Expr>,
+    pub affects:HashSet<String>,
     neighbors: Vec<String>
 }
 
@@ -121,11 +121,12 @@ impl Domain {
     fn build_method(&mut self, context: &mut Option<BuildContext>, name:String, preconditions:Option<Expr>, body:Box<Stmt>) -> Result<(), DomainError>  {
         use TaskStatement::*;
         if let Some(BuildContext::Task(task_name, task_type)) = context {
+            let newtask_name = format!("Task_{}_method_{}", task_name, name);
             match task_type {
                 Some(Primitive(_, _)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
-                None => *task_type = {let methods_vec = vec![name]; Some(Composite(methods_vec))},
+                None => *task_type = {let methods_vec = vec![newtask_name]; Some(Composite(methods_vec))},
                 Some(Composite(methods_vec)) => {
-                    let newtask_name = format!("{}_method{}", task_name, name);
+                    
                     methods_vec.push(newtask_name.clone());
                     let mut build_context = Some(BuildContext::Task(newtask_name, Some(Primitive(Vec::new(), true))));
                     self.process_stmt(&mut build_context, &body)?;
@@ -247,6 +248,7 @@ impl Domain {
         let mut domain = Domain{tasks: HashMap::new(), world_variables:HashSet::new(), blackboard_variables:HashSet::new(), operators:HashSet::new()};
         domain.pass(&ast)?;
         domain.optimize();
+        println!("{:?}", domain.tasks.keys());
         Ok(domain)
     }
 }
