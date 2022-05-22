@@ -14,9 +14,15 @@ impl fmt::Debug for DomainError {
 }
 
 #[derive(Debug)]
+pub enum TaskStatement {
+    Composite(Vec<String>),
+    Primitive(Vec<Expr>)
+}
+
+#[derive(Debug)]
 pub struct Task {
     preconditions:Option<Expr>, 
-    body:Box<Stmt>, 
+    body:TaskStatement, 
     effects:Option<Box<Stmt>>,
     neighbors: Vec<String>
 }
@@ -46,22 +52,22 @@ enum ExpressionType {
     Assignment(String)
 }
 
-enum TaskType {
-    Primitive,
-    Composite,
-}
-
 enum BuildContext {
-    Task(String, Option<TaskType>),
+    Task(String, Option<TaskStatement>),
     Expression(ExpressionType),
 }
 
-#[derive(Debug)]
 pub struct Domain {
     pub tasks: HashMap<String, Task>,
     pub world_variables: HashSet<String>,
     pub blackboard_variables: HashSet<String>,
     pub operators: HashSet<String>,
+}
+
+impl std::fmt::Debug for Domain {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Domain").field("tasks", &self.tasks.keys()).field("world_variables", &self.world_variables).field("blackboard_variables", &self.blackboard_variables).field("operators", &self.operators).finish()
+    }
 }
 
 impl Domain {
@@ -76,7 +82,7 @@ impl Domain {
             if tname != name {
                 return Err(DomainError{message:format!("Task build context got overwritten")});
             }
-            self.tasks.insert(name, Task{preconditions:preconditions.clone(), body, effects:effects.clone(), neighbors:Vec::new()});
+            self.tasks.insert(name.clone(), Task{preconditions:preconditions.clone(), body:t, effects:effects.clone(), neighbors:Vec::new()});
         } else {
             return Err(DomainError{message:format!("Task build context got overwritten")});
         }
@@ -90,26 +96,37 @@ impl Domain {
 
     }
     fn build_method(&mut self, context: &mut Option<BuildContext>, name:String, preconditions:Option<Expr>, body:Box<Stmt>) -> Result<(), DomainError>  {
+        use TaskStatement::*;
         if let Some(BuildContext::Task(task_name, task_type)) = context {
             match task_type {
-                Some(TaskType::Primitive) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
-                None => *task_type = Some(TaskType::Composite),
-                _ => (),
+                Some(Primitive(_)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
+                None => *task_type = {let methods_vec = vec![name]; Some(Composite(methods_vec))},
+                Some(Composite(methods_vec)) => {
+                    let newtask_name = format!("{}_method{}", task_name, name);
+                    methods_vec.push(newtask_name.clone());
+                    let mut build_context = Some(BuildContext::Task(newtask_name, Some(Primitive(Vec::new()))));
+                    self.process_stmt(&mut build_context, &body)?;
+                    if let Some(BuildContext::Task(nn, Some(ntb))) = build_context {
+                        self.tasks.insert(nn, Task{preconditions, body:ntb, effects:None, neighbors:Vec::new()});
+                    }
+                },
             }
+            Ok(())
         } else {
             return Err(DomainError{message:format!("Method declaration outside of task body is not allowed.")});
         }
-        self.process_stmt(&mut None, &body)
+        
 
     }
     fn process_expr(&mut self, context:&mut Option<BuildContext>, expr:&Expr) -> Result<(), DomainError>  {
         use Expr::*;
         use BuildContext::*;
+        use TaskStatement::*;
         if let Some(Task(task_name, task_type)) = context {
             match task_type {
-                Some(TaskType::Composite) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
-                None => *task_type = Some(TaskType::Primitive),
-                _ => (),
+                Some(Composite(_)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
+                Some(Primitive(expr_vec)) => expr_vec.push(expr.clone()),
+                None => *task_type = Some(Primitive(Vec::new())),
             }
         }
         Ok(match expr {
