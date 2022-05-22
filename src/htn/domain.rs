@@ -13,17 +13,17 @@ impl fmt::Debug for DomainError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TaskStatement {
     Composite(Vec<String>),
     Primitive(Vec<Expr>)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Task {
     preconditions:Option<Expr>, 
     body:TaskStatement, 
-    effects:Option<Box<Stmt>>,
+    effects:Vec<Expr>,
     neighbors: Vec<String>
 }
 
@@ -54,6 +54,8 @@ enum ExpressionType {
 
 enum BuildContext {
     Task(String, Option<TaskStatement>),
+    Effects(Vec<Expr>),
+    Preconditions(Option<Expr>),
     Expression(ExpressionType),
 }
 
@@ -66,7 +68,7 @@ pub struct Domain {
 
 impl std::fmt::Debug for Domain {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Domain").field("tasks", &self.tasks.keys()).field("world_variables", &self.world_variables).field("blackboard_variables", &self.blackboard_variables).field("operators", &self.operators).finish()
+        f.debug_struct("Domain").field("tasks", &self.tasks).field("world_variables", &self.world_variables).field("blackboard_variables", &self.blackboard_variables).field("operators", &self.operators).finish()
     }
 }
 
@@ -76,22 +78,31 @@ impl Domain {
             return Err(DomainError{message:format!("Nested task definition is not allowed.")});
         }
         self.operators.remove(&name);
-        let mut build_context = Some(BuildContext::Task(name.clone(), None));
-        self.process_stmt(&mut build_context, &body)?;
-        if let Some(BuildContext::Task(tname, Some(t))) = build_context {
+        let mut task_build_context = Some(BuildContext::Task(name.clone(), None));
+        self.process_stmt(&mut task_build_context, &body)?;
+        if let Some(BuildContext::Task(tname, Some(body))) = task_build_context {
             if tname != name {
                 return Err(DomainError{message:format!("Task build context got overwritten")});
             }
-            self.tasks.insert(name.clone(), Task{preconditions:preconditions.clone(), body:t, effects:effects.clone(), neighbors:Vec::new()});
+            if let Some(ref expr) = preconditions {
+                self.process_expr(&mut None, expr)?;
+            }
+            let mut effects_build_context = Some(BuildContext::Effects(Vec::new()));
+            let effects = if let Some(stmt) = effects {
+                self.process_stmt(&mut effects_build_context, &stmt)?;
+                if let Some(BuildContext::Effects(r)) = effects_build_context {
+                    r
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
+            self.tasks.insert(name.clone(), Task{preconditions, body, effects, neighbors:Vec::new()});
         } else {
             return Err(DomainError{message:format!("Task build context got overwritten")});
         }
-        if let Some(expr) = preconditions {
-            self.process_expr(&mut None, &expr)?;
-        }
-        if let Some(stmt) = effects {
-            self.process_stmt(&mut None, &stmt)?;
-        }
+
         Ok(())
 
     }
@@ -107,7 +118,7 @@ impl Domain {
                     let mut build_context = Some(BuildContext::Task(newtask_name, Some(Primitive(Vec::new()))));
                     self.process_stmt(&mut build_context, &body)?;
                     if let Some(BuildContext::Task(nn, Some(ntb))) = build_context {
-                        self.tasks.insert(nn, Task{preconditions, body:ntb, effects:None, neighbors:Vec::new()});
+                        self.tasks.insert(nn, Task{preconditions, body:ntb, effects:Vec::new(), neighbors:Vec::new()});
                     }
                 },
             }
@@ -122,26 +133,34 @@ impl Domain {
         use Expr::*;
         use BuildContext::*;
         use TaskStatement::*;
+        let mut new_context: &mut Option<BuildContext> = &mut None;
         if let Some(Task(task_name, task_type)) = context {
             match task_type {
                 Some(Composite(_)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
                 Some(Primitive(expr_vec)) => expr_vec.push(expr.clone()),
-                None => *task_type = Some(Primitive(Vec::new())),
+                None => *task_type = Some(Primitive(vec!(expr.clone()))),
             }
+        } else {
+            new_context = context;
         }
         Ok(match expr {
-            Binary(left, _, right) => {self.process_expr(context, left.as_ref())?; self.process_expr(context, right.as_ref())?},
-            Grouping(g) => self.process_expr(context, g.as_ref())?,
+            Binary(left, _, right) => {self.process_expr(new_context, left.as_ref())?; self.process_expr(context, right.as_ref())?},
+            Grouping(g) => self.process_expr(new_context, g.as_ref())?,
             Literal(_) => (),
-            Variable(var_name) => match context {
+            Variable(var_name) => match new_context {
                 Some(Expression(ExpressionType::Call(v))) => v.insert_str(0,var_name), 
                 _ => (),
             },
-            Unary(_, right) => self.process_expr(context, right)?,
+            Unary(_, right) => self.process_expr(new_context, right)?,
             Assignment(var_name, right) => { match right.as_ref() {
                 Call(_, _, _) => self.blackboard_variables.insert(var_name.clone()),
                 _ => self.world_variables.insert(var_name.clone()),
             };
+            if let Some(Effects(ref mut e_vec)) = new_context {
+                e_vec.push(expr.clone());
+            }
+            self.process_expr(new_context, right)?;
+            
             },
             Call(left, _, args) => {
                 let mut build_context = Some(Expression(ExpressionType::Call(String::new())));
@@ -152,7 +171,7 @@ impl Domain {
                     }
                 }
                 for e in args {
-                    self.process_expr(context, e)?;
+                    self.process_expr(new_context, e)?;
                 }
             },
         })
@@ -177,14 +196,32 @@ impl Domain {
         Ok(())
     }
 
+    fn optimize(&mut self) {
+        let tasks = self.tasks.clone();
+        for task_name in tasks.keys() {
+            if let Some(ref mut task) = self.tasks.get_mut(task_name) {
+                for (other_name, other) in tasks.iter() {
+                    if task_name != other_name {
+
+                    }
+                }
+            }
+        }
+        
+    }
+
 
     pub fn from_file(filepath:&str) -> Result<Domain, DomainError> {
         let htn_source = fs::read_to_string(filepath).expect("File error:");
         let (ast, errors) = Parser::parse(htn_source.as_str());
         Parser::print_parse_errors(errors, htn_source.as_str(), filepath);
         let mut domain = Domain{tasks: HashMap::new(), world_variables:HashSet::new(), blackboard_variables:HashSet::new(), operators:HashSet::new()};
+        println!("{:?}", &ast);
         domain.pass(&ast)?;
         println!("{:?}", domain);
+        for e in  &domain.tasks.get("GotoRestaurant").unwrap().effects {
+                println!("{:?}", e);
+        }
         Ok(domain)
     }
 }

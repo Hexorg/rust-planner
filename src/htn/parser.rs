@@ -199,8 +199,8 @@ impl Lexer {
                         if let Token{t:TokenData::LABEL(label), ..} = last_token {
                             label.push(c);
                             last_token.len += 1;
-                            if let Some(t) = if let Some(next_char) = it.peek() {
-                                if !next_char.is_alphanumeric() {
+                            let should_convert = if let Some(next_char) = it.peek() { !next_char.is_alphanumeric() } else { true };
+                            if let Some(t) = if should_convert {
                                     match label.clone().as_str() { // if the label composes a keyword, replace with keyword
                                         "task" => Some(TokenData::TASK),
                                         "method" => Some(TokenData::METHOD),
@@ -215,8 +215,7 @@ impl Lexer {
                                                 Some(TokenData::LITERAL(literal))
                                             } else { None },
                                     }
-                                } else { None }
-                            } else { None } {
+                                } else { None } {
                                 last_token.t = t;
                             }
                         } else { // last token isn't a label so we're starting a new label or keyword
