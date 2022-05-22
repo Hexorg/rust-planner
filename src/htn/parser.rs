@@ -607,7 +607,7 @@ impl Parser {
             Ok(tokens) => Parser{idx:0, tokens},
             Err(e) => { errors.push(e); return (ast, errors); }
         };
-        Parser::print_tokens(&parser.tokens);
+        // Parser::print_tokens(&parser.tokens);
         while parser.idx + 1 < parser.tokens.len() {
             match parser.statement() {
                 Err(e) => {errors.push(e); parser.error_recover(); },

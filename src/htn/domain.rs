@@ -16,14 +16,16 @@ impl fmt::Debug for DomainError {
 #[derive(Debug, Clone)]
 pub enum TaskStatement {
     Composite(Vec<String>),
-    Primitive(Vec<Expr>)
+    Primitive(Vec<Expr>, bool)
 }
 
 #[derive(Debug, Clone)]
 pub struct Task {
     preconditions:Option<Expr>, 
+    dependencies:HashSet<String>,
     body:TaskStatement, 
     effects:Vec<Expr>,
+    affects:HashSet<String>,
     neighbors: Vec<String>
 }
 
@@ -54,8 +56,8 @@ enum ExpressionType {
 
 enum BuildContext {
     Task(String, Option<TaskStatement>),
-    Effects(Vec<Expr>),
-    Preconditions(Option<Expr>),
+    Effects(Vec<Expr>, HashSet<String>),
+    Preconditions(Option<Expr>, HashSet<String>),
     Expression(ExpressionType),
 }
 
@@ -72,6 +74,7 @@ impl std::fmt::Debug for Domain {
     }
 }
 
+
 impl Domain {
     fn build_task(&mut self, context: &mut Option<BuildContext>, name:String, preconditions:Option<Expr>, body:Box<Stmt>, effects:Option<Box<Stmt>>) -> Result<(), DomainError>  {
         if context.is_some() {
@@ -84,21 +87,30 @@ impl Domain {
             if tname != name {
                 return Err(DomainError{message:format!("Task build context got overwritten")});
             }
-            if let Some(ref expr) = preconditions {
-                self.process_expr(&mut None, expr)?;
-            }
-            let mut effects_build_context = Some(BuildContext::Effects(Vec::new()));
-            let effects = if let Some(stmt) = effects {
-                self.process_stmt(&mut effects_build_context, &stmt)?;
-                if let Some(BuildContext::Effects(r)) = effects_build_context {
-                    r
+            
+            let (preconditions, dependencies) = if let Some(ref expr) = preconditions {
+                let mut preconditions_build_context = Some(BuildContext::Preconditions(Some(expr.clone()), HashSet::new()));
+                self.process_expr(&mut preconditions_build_context, expr)?;
+                if let Some(BuildContext::Preconditions(r, e)) = preconditions_build_context {
+                    (r, e)
                 } else {
-                    Vec::new()
+                    (None, HashSet::new())
                 }
             } else {
-                Vec::new()
+                (None, HashSet::new())
             };
-            self.tasks.insert(name.clone(), Task{preconditions, body, effects, neighbors:Vec::new()});
+            let (effects, affects) = if let Some(stmt) = effects {
+                let mut effects_build_context = Some(BuildContext::Effects(Vec::new(), HashSet::new()));
+                self.process_stmt(&mut effects_build_context, &stmt)?;
+                if let Some(BuildContext::Effects(r, e)) = effects_build_context {
+                    (r, e)
+                } else {
+                    (Vec::new(), HashSet::new())
+                }
+            } else {
+                (Vec::new(), HashSet::new())
+            };
+            self.tasks.insert(name.clone(), Task{preconditions, dependencies, body, effects, affects, neighbors:Vec::new()});
         } else {
             return Err(DomainError{message:format!("Task build context got overwritten")});
         }
@@ -110,15 +122,26 @@ impl Domain {
         use TaskStatement::*;
         if let Some(BuildContext::Task(task_name, task_type)) = context {
             match task_type {
-                Some(Primitive(_)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
+                Some(Primitive(_, _)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
                 None => *task_type = {let methods_vec = vec![name]; Some(Composite(methods_vec))},
                 Some(Composite(methods_vec)) => {
                     let newtask_name = format!("{}_method{}", task_name, name);
                     methods_vec.push(newtask_name.clone());
-                    let mut build_context = Some(BuildContext::Task(newtask_name, Some(Primitive(Vec::new()))));
+                    let mut build_context = Some(BuildContext::Task(newtask_name, Some(Primitive(Vec::new(), true))));
                     self.process_stmt(&mut build_context, &body)?;
                     if let Some(BuildContext::Task(nn, Some(ntb))) = build_context {
-                        self.tasks.insert(nn, Task{preconditions, body:ntb, effects:Vec::new(), neighbors:Vec::new()});
+                        let (preconditions, dependencies) = if let Some(ref expr) = preconditions {
+                            let mut preconditions_build_context = Some(BuildContext::Preconditions(Some(expr.clone()), HashSet::new()));
+                            self.process_expr(&mut preconditions_build_context, expr)?;
+                            if let Some(BuildContext::Preconditions(r, e)) = preconditions_build_context {
+                                (r, e)
+                            } else {
+                                (None, HashSet::new())
+                            }
+                        } else {
+                            (None, HashSet::new())
+                        };
+                        self.tasks.insert(nn, Task{preconditions, dependencies, body:ntb, effects:Vec::new(), affects:HashSet::new(), neighbors:Vec::new()});
                     }
                 },
             }
@@ -137,8 +160,8 @@ impl Domain {
         if let Some(Task(task_name, task_type)) = context {
             match task_type {
                 Some(Composite(_)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
-                Some(Primitive(expr_vec)) => expr_vec.push(expr.clone()),
-                None => *task_type = Some(Primitive(vec!(expr.clone()))),
+                Some(Primitive(expr_vec, _)) => expr_vec.push(expr.clone()),
+                None => *task_type = Some(Primitive(vec!(expr.clone()), false)),
             }
         } else {
             new_context = context;
@@ -149,6 +172,7 @@ impl Domain {
             Literal(_) => (),
             Variable(var_name) => match new_context {
                 Some(Expression(ExpressionType::Call(v))) => v.insert_str(0,var_name), 
+                Some(Preconditions(_, set)) => {set.insert(var_name.clone());},
                 _ => (),
             },
             Unary(_, right) => self.process_expr(new_context, right)?,
@@ -156,8 +180,9 @@ impl Domain {
                 Call(_, _, _) => self.blackboard_variables.insert(var_name.clone()),
                 _ => self.world_variables.insert(var_name.clone()),
             };
-            if let Some(Effects(ref mut e_vec)) = new_context {
-                e_vec.push(expr.clone());
+            match new_context {
+                Some(Effects(e_vec,set)) => {e_vec.push(expr.clone()); set.insert(var_name.clone());},
+                _ => (),
             }
             self.process_expr(new_context, right)?;
             
@@ -202,7 +227,11 @@ impl Domain {
             if let Some(ref mut task) = self.tasks.get_mut(task_name) {
                 for (other_name, other) in tasks.iter() {
                     if task_name != other_name {
-
+                        // if task effects other's preconditions
+                        if task.affects.intersection(&other.dependencies).count() > 0 {
+                            task.neighbors.push(other_name.clone());
+                            println!("{} enables {}", task_name, other_name);
+                        }
                     }
                 }
             }
@@ -216,12 +245,8 @@ impl Domain {
         let (ast, errors) = Parser::parse(htn_source.as_str());
         Parser::print_parse_errors(errors, htn_source.as_str(), filepath);
         let mut domain = Domain{tasks: HashMap::new(), world_variables:HashSet::new(), blackboard_variables:HashSet::new(), operators:HashSet::new()};
-        println!("{:?}", &ast);
         domain.pass(&ast)?;
-        println!("{:?}", domain);
-        for e in  &domain.tasks.get("GotoRestaurant").unwrap().effects {
-                println!("{:?}", e);
-        }
+        domain.optimize();
         Ok(domain)
     }
 }
