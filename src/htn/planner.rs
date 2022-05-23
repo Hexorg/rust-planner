@@ -1,12 +1,13 @@
-use std::{slice::SliceIndex, collections::HashMap, rc::Rc, ops::Deref};
+use std::{collections::HashMap, ops::Deref};
 
-use super::{domain::Domain, parser::{Stmt, Expr, TokenData}};
+use super::{domain::Domain, parser::{Expr, TokenData}};
 
 pub struct Planner<'a> {
     domain: &'a Domain,
     state: HashMap<String, i32>,
 }
 
+#[derive(Debug)]
 enum ExpressionResult {
     Literal(i32), 
     Task(String),
@@ -94,9 +95,11 @@ impl Planner<'_>{
                     println!("Method_name:{} ", method_name);
                     let method = self.domain.tasks.get(method_name).unwrap();
                     if if let Some(ref preconditions) = method.preconditions {
-                        if let ExpressionResult::Literal(val) = self.run_expr(preconditions) {
+                        let r = self.run_expr(preconditions);
+                        if let ExpressionResult::Literal(val) = r {
                             val == 1
                         } else {
+                            println!("Expression result: {:?}", r);
                             panic!("Unexpected precondition result.");
                         }
                     } else {
@@ -118,6 +121,9 @@ impl Planner<'_>{
     // }
     pub fn run<'a>(domain: &'a Domain) {
         let mut state = HashMap::new();
+        for var in &domain.world_variables {
+            state.insert(var.clone(), 0);
+        }
         state.insert(String::from("isHungry"), 1);
         let mut planner = Planner{domain, state};
         planner.run_task("Main");

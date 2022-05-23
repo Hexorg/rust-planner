@@ -124,27 +124,26 @@ impl Domain {
             let newtask_name = format!("Task_{}_method_{}", task_name, name);
             match task_type {
                 Some(Primitive(_, _)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
-                None => *task_type = {let methods_vec = vec![newtask_name]; Some(Composite(methods_vec))},
-                Some(Composite(methods_vec)) => {
-                    
-                    methods_vec.push(newtask_name.clone());
-                    let mut build_context = Some(BuildContext::Task(newtask_name, Some(Primitive(Vec::new(), true))));
-                    self.process_stmt(&mut build_context, &body)?;
-                    if let Some(BuildContext::Task(nn, Some(ntb))) = build_context {
-                        let (preconditions, dependencies) = if let Some(ref expr) = preconditions {
-                            let mut preconditions_build_context = Some(BuildContext::Preconditions(Some(expr.clone()), HashSet::new()));
-                            self.process_expr(&mut preconditions_build_context, expr)?;
-                            if let Some(BuildContext::Preconditions(r, e)) = preconditions_build_context {
-                                (r, e)
-                            } else {
-                                (None, HashSet::new())
-                            }
-                        } else {
-                            (None, HashSet::new())
-                        };
-                        self.tasks.insert(nn, Task{preconditions, dependencies, body:ntb, effects:Vec::new(), affects:HashSet::new(), neighbors:Vec::new()});
+                None => *task_type = {let methods_vec = vec![newtask_name.clone()]; Some(Composite(methods_vec))},
+                Some(Composite(methods_vec)) => {methods_vec.push(newtask_name.clone());}
+            }    
+            let mut build_context = Some(BuildContext::Task(newtask_name, Some(Primitive(Vec::new(), true))));
+            self.process_stmt(&mut build_context, &body)?;
+            if let Some(BuildContext::Task(nn, Some(ntb))) = build_context {
+                let (preconditions, dependencies) = if let Some(ref expr) = preconditions {
+                    let mut preconditions_build_context = Some(BuildContext::Preconditions(Some(expr.clone()), HashSet::new()));
+                    self.process_expr(&mut preconditions_build_context, expr)?;
+                    if let Some(BuildContext::Preconditions(r, e)) = preconditions_build_context {
+                        (r, e)
+                    } else {
+                        (None, HashSet::new())
                     }
-                },
+                } else {
+                    (None, HashSet::new())
+                };
+                self.tasks.insert(nn, Task{preconditions, dependencies, body:ntb, effects:Vec::new(), affects:HashSet::new(), neighbors:Vec::new()});
+            } else {
+                panic!("build context got overwritten.");
             }
             Ok(())
         } else {
