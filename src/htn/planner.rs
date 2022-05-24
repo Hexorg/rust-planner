@@ -1,10 +1,13 @@
 use std::{collections::HashMap, ops::Deref};
 
+use crate::htn::search::Astar;
+
 use super::{domain::Domain, parser::{Expr, TokenData}};
 
 pub struct Planner<'a> {
     domain: &'a Domain,
     state: HashMap<String, i32>,
+    last_task: String,
 }
 
 #[derive(Debug)]
@@ -83,9 +86,10 @@ impl Planner<'_>{
     fn run_task(&mut self, task_name: &str) {
         let task = self.domain.tasks.get(task_name).unwrap();
         if let Some(ref preconditions) = task.preconditions {
-            match self.run_expr(preconditions) {
+            let r = self.run_expr(preconditions);
+            match r {
                 ExpressionResult::Literal(val) => if val == 0 { todo!("Figure out how to enable this task")},
-                _ => panic!("Unexpected precondition result.")
+                _ => {println!("{:?}", r); panic!("Unexpected precondition result.");}
             }
         }
         match &task.body {
@@ -110,6 +114,10 @@ impl Planner<'_>{
                     }
                 }
                 if !is_run_method {
+                    for method_name in methods {
+                        let path = Astar(&self.last_task, method_name, |f| 5, self.domain);
+                        println!("Path: {:?}", path);
+                    }
                     todo!("Figure out how to enable a method.");
                 }
             },
@@ -125,7 +133,7 @@ impl Planner<'_>{
             state.insert(var.clone(), 0);
         }
         state.insert(String::from("isHungry"), 1);
-        let mut planner = Planner{domain, state};
+        let mut planner = Planner{domain, state, last_task:String::from("Main")};
         planner.run_task("Main");
     }
 }

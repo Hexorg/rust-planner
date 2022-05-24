@@ -26,27 +26,7 @@ pub struct Task {
     pub body:TaskStatement, 
     pub effects:Vec<Expr>,
     pub affects:HashSet<String>,
-    neighbors: Vec<String>
-}
-
-
-struct TaskIterator<'a> {
-    iter: Iter<'a, String>
-}
-
-impl<'a> Iterator for TaskIterator<'a> {
-    type Item = &'a String;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next()
-    }
-}
-
-impl<'a> LinkedNode<'a, Task, TaskIterator<'a>> for Task {
-    fn neighbors(&self) -> TaskIterator {
-        TaskIterator{iter:self.neighbors.iter()}
-        
-    }
+    pub neighbors: Vec<String>
 }
 
 enum ExpressionType {
@@ -239,6 +219,9 @@ impl Domain {
         
     }
 
+    pub fn cost(&self, from:&String, to:&String) -> i32 {
+        4
+    }
 
     pub fn from_file(filepath:&str) -> Result<Domain, DomainError> {
         let htn_source = fs::read_to_string(filepath).expect("File error:");

@@ -1,15 +1,15 @@
 use std::{collections::HashMap, cmp::Reverse};
-
+use super::domain::Domain;
 use priority_queue::PriorityQueue;
 
 // pub struct Astar {}
 
 pub trait LinkedNode<'a, Node:'a, T> {
-    fn neighbors(&'a self) -> T where T: Iterator<Item = (&'a Node, i32)>;
+    fn neighbors(&'a self) -> T where T: Iterator<Item = &'a String>;
 }
 
 // impl Astar {
-    fn reconstruct_path<'a, Node>(cameFrom:HashMap<&'a Node, &'a Node>, current:&'a Node) -> Vec<&'a Node> where Node:std::cmp::Eq + std::hash::Hash  {
+    fn reconstruct_path<'a>(cameFrom:HashMap<&'a String, &'a String>, current:&'a String) -> Vec<&'a String> where {
         let mut total_path = Vec::new();
         let mut current = current;
         total_path.push(current);
@@ -19,7 +19,7 @@ pub trait LinkedNode<'a, Node:'a, T> {
         }
         return total_path;
     }
-    pub fn Astar<'a, Node:'a, F, I>(start:&'a Node, goal:&Node, heuristic: F) -> Option<Vec<&'a Node>> where I:Iterator<Item = (&'a Node, i32)>, Node:std::cmp::Eq + std::hash::Hash + LinkedNode<'a, Node, I>, F: Fn(&Node)->i32 {
+    pub fn Astar<'a, F>(start:&'a String, goal:&'a String, heuristic: F, domain:&'a Domain) -> Option<Vec<&'a String>> where  F: Fn(&String)->i32 {
         let mut openSet = PriorityQueue::new();
         let mut cameFrom = HashMap::new();
         let mut gScore = HashMap::new();
@@ -33,7 +33,9 @@ pub trait LinkedNode<'a, Node:'a, T> {
                 if current == goal {
                     return Some(reconstruct_path(cameFrom, current));
                 }
-                for (nbr, cost) in current.neighbors() {
+                
+                for nbr in &domain.tasks.get(current).unwrap().neighbors {
+                    let cost = domain.cost(current, nbr);
                     let tentative_gScore = gScore[current] + cost;
                     if tentative_gScore < gScore[nbr] {
                         cameFrom.insert(nbr, current);
