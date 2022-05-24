@@ -1,5 +1,7 @@
 use std::{collections::HashMap, cmp::Reverse};
-use super::domain::Domain;
+use super::domain::{Domain, Task};
+use super::parser::Expr;
+use super::planner::{State, Planner};
 use priority_queue::PriorityQueue;
 
 // pub struct Astar {}
@@ -9,17 +11,17 @@ pub trait LinkedNode<'a, Node:'a, T> {
 }
 
 // impl Astar {
-    fn reconstruct_path<'a>(cameFrom:HashMap<&'a String, &'a String>, current:&'a String) -> Vec<&'a String> where {
+    fn reconstruct_path<'a>(came_from:HashMap<&'a State, &'a State>, current:&'a State) -> Vec<&'a State> where {
         let mut total_path = Vec::new();
         let mut current = current;
         total_path.push(current);
-        while cameFrom.contains_key(current) {
-            current = cameFrom[current];
+        while came_from.contains_key(current) {
+            current = came_from[current];
             total_path.push(current);
         }
         return total_path;
     }
-    pub fn Astar<'a, F>(start:&'a String, goal:&'a String, heuristic: F, domain:&'a Domain) -> Option<Vec<&'a String>> where  F: Fn(&String)->i32 {
+    pub fn Astar<'a, F>(start:&'a State, goal:&'a Task, heuristic: F, domain:&'a Domain) -> Option<Vec<&'a State>> where  F: Fn(&State)->i32 {
         let mut openSet = PriorityQueue::new();
         let mut cameFrom = HashMap::new();
         let mut gScore = HashMap::new();
@@ -30,21 +32,22 @@ pub trait LinkedNode<'a, Node:'a, T> {
         fScore.insert(start, currentCost);
         while openSet.len() > 0 {
             if let Some((current, _)) = openSet.pop() {
-                if current == goal {
+                if goal.preconditions.as_ref().unwrap().eval(&start.0) == 1 {
                     return Some(reconstruct_path(cameFrom, current));
                 }
                 
-                for nbr in &domain.tasks.get(current).unwrap().neighbors {
-                    let cost = domain.cost(current, nbr);
+                for (nbr, cost) in goal.neighbors(domain) {
                     let tentative_gScore = gScore[current] + cost;
-                    if tentative_gScore < gScore[nbr] {
-                        cameFrom.insert(nbr, current);
-                        gScore.insert(nbr, tentative_gScore);
-                        currentCost = tentative_gScore+heuristic(nbr);
-                        if !fScore.contains_key(nbr) {
-                            openSet.push(nbr, Reverse(currentCost));
+                    let mut new_state = current.clone();
+                    nbr.effects.iter().for_each(|e| {e.eval(&new_state.0);});
+                    if tentative_gScore < gScore[new_state] {
+                        cameFrom.insert(new_state, current);
+                        gScore.insert(new_state, tentative_gScore);
+                        currentCost = tentative_gScore+heuristic(new_state);
+                        if !fScore.contains_key(new_state) {
+                            openSet.push(new_state, Reverse(currentCost));
                         }
-                        fScore.insert(nbr, currentCost);
+                        fScore.insert(new_state, currentCost);
                         
 
                     }

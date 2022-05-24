@@ -13,20 +13,47 @@ impl fmt::Debug for DomainError {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum TaskStatement {
-    Composite(Vec<String>),
-    Primitive(Vec<Expr>, bool)
+#[derive(Clone, Debug)]
+pub struct Method {
+    pub name: String,
+    pub preconditions:Option<Expr>, 
+    pub dependencies:HashSet<String>,
+    pub body:Vec<Expr>, 
+    neighbors: Vec<String>
 }
 
 #[derive(Debug, Clone)]
+pub enum TaskStatement {
+    Composite(Vec<Method>),
+    Primitive(Vec<Expr>)
+}
+
+
+#[derive(Debug, Clone)]
 pub struct Task {
+    pub name:String,
     pub preconditions:Option<Expr>, 
     pub dependencies:HashSet<String>,
     pub body:TaskStatement, 
     pub effects:Vec<Expr>,
     pub affects:HashSet<String>,
-    pub neighbors: Vec<String>
+    neighbors: Vec<String>
+}
+
+impl std::hash::Hash for Task {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state)
+    }
+}
+
+impl std::cmp::PartialEq for Task {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name 
+    }
+}
+
+impl std::cmp::Eq for Task {
+    
 }
 
 enum ExpressionType {
@@ -36,6 +63,7 @@ enum ExpressionType {
 
 enum BuildContext {
     Task(String, Option<TaskStatement>),
+    Method(Vec<Expr>),
     Effects(Vec<Expr>, HashSet<String>),
     Preconditions(Option<Expr>, HashSet<String>),
     Expression(ExpressionType),
@@ -54,6 +82,16 @@ impl std::fmt::Debug for Domain {
     }
 }
 
+impl Task {
+    pub fn neighbors<'a>(&self, domain:&'a Domain) -> Vec<(&'a Task, i32)> {
+        let mut r = Vec::new();
+        for n in &self.neighbors {
+            r.push((domain.tasks.get(n).unwrap(), 2));
+        }
+
+        r
+    }
+}
 
 impl Domain {
     fn build_task(&mut self, context: &mut Option<BuildContext>, name:String, preconditions:Option<Expr>, body:Box<Stmt>, effects:Option<Box<Stmt>>) -> Result<(), DomainError>  {
@@ -90,7 +128,7 @@ impl Domain {
             } else {
                 (Vec::new(), HashSet::new())
             };
-            self.tasks.insert(name.clone(), Task{preconditions, dependencies, body, effects, affects, neighbors:Vec::new()});
+            self.tasks.insert(name.clone(), Task{name, preconditions, dependencies, body, effects, affects, neighbors:Vec::new()});
         } else {
             return Err(DomainError{message:format!("Task build context got overwritten")});
         }
@@ -101,30 +139,31 @@ impl Domain {
     fn build_method(&mut self, context: &mut Option<BuildContext>, name:String, preconditions:Option<Expr>, body:Box<Stmt>) -> Result<(), DomainError>  {
         use TaskStatement::*;
         if let Some(BuildContext::Task(task_name, task_type)) = context {
-            let newtask_name = format!("Task_{}_method_{}", task_name, name);
-            match task_type {
-                Some(Primitive(_, _)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
-                None => *task_type = {let methods_vec = vec![newtask_name.clone()]; Some(Composite(methods_vec))},
-                Some(Composite(methods_vec)) => {methods_vec.push(newtask_name.clone());}
-            }    
-            let mut build_context = Some(BuildContext::Task(newtask_name, Some(Primitive(Vec::new(), true))));
+            let mut build_context = Some(BuildContext::Method(Vec::new()));
             self.process_stmt(&mut build_context, &body)?;
-            if let Some(BuildContext::Task(nn, Some(ntb))) = build_context {
-                let (preconditions, dependencies) = if let Some(ref expr) = preconditions {
-                    let mut preconditions_build_context = Some(BuildContext::Preconditions(Some(expr.clone()), HashSet::new()));
-                    self.process_expr(&mut preconditions_build_context, expr)?;
-                    if let Some(BuildContext::Preconditions(r, e)) = preconditions_build_context {
-                        (r, e)
-                    } else {
-                        (None, HashSet::new())
-                    }
+            let body = if let Some(BuildContext::Method(body)) = build_context {
+                body
+            } else {
+                panic!("Build context got everwritten");
+            };
+            let (preconditions, dependencies) = if let Some(ref expr) = preconditions {
+                let mut preconditions_build_context = Some(BuildContext::Preconditions(Some(expr.clone()), HashSet::new()));
+                self.process_expr(&mut preconditions_build_context, expr)?;
+                if let Some(BuildContext::Preconditions(r, e)) = preconditions_build_context {
+                    (r, e)
                 } else {
                     (None, HashSet::new())
-                };
-                self.tasks.insert(nn, Task{preconditions, dependencies, body:ntb, effects:Vec::new(), affects:HashSet::new(), neighbors:Vec::new()});
+                }
             } else {
-                panic!("build context got overwritten.");
-            }
+                (None, HashSet::new())
+            };
+            let me = Method{name, preconditions, dependencies, body, neighbors:Vec::new()};
+            match task_type {
+                Some(Primitive(_)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
+                Some(Composite(method_vec)) => method_vec.push(me),
+                None => *task_type = Some(Composite(vec![me])),
+            } 
+
             Ok(())
         } else {
             return Err(DomainError{message:format!("Method declaration outside of task body is not allowed.")});
@@ -140,8 +179,8 @@ impl Domain {
         if let Some(Task(task_name, task_type)) = context {
             match task_type {
                 Some(Composite(_)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
-                Some(Primitive(expr_vec, _)) => expr_vec.push(expr.clone()),
-                None => *task_type = Some(Primitive(vec!(expr.clone()), false)),
+                Some(Primitive(expr_vec)) => expr_vec.push(expr.clone()),
+                None => *task_type = Some(Primitive(vec!(expr.clone()))),
             }
         } else {
             new_context = context;
@@ -167,13 +206,9 @@ impl Domain {
             self.process_expr(new_context, right)?;
             
             },
-            Call(left, _, args) => {
-                let mut build_context = Some(Expression(ExpressionType::Call(String::new())));
-                self.process_expr(&mut build_context, left)?; 
-                if let Some(Expression(ExpressionType::Call(call_target))) = build_context {
-                    if !self.tasks.contains_key(&call_target) {
-                        self.operators.insert(call_target);
-                    }
+            Call(target, _, args) => {
+                if !self.tasks.contains_key(target) {
+                    self.operators.insert(target.clone());
                 }
                 for e in args {
                     self.process_expr(new_context, e)?;
@@ -204,12 +239,13 @@ impl Domain {
     fn optimize(&mut self) {
         let tasks = self.tasks.clone();
         for task_name in tasks.keys() {
-            if let Some(ref mut task) = self.tasks.get_mut(task_name) {
-                for (other_name, other) in tasks.iter() {
+            if let Some(ref task) = tasks.get(task_name) {
+                for (other_name, other) in self.tasks.iter_mut() {
                     if task_name != other_name {
                         // if task effects other's preconditions
                         if task.affects.intersection(&other.dependencies).count() > 0 {
-                            task.neighbors.push(other_name.clone());
+                            other.neighbors.push(task_name.clone());
+                            // task.neighbors.push(other_name.clone());
                             println!("{} enables {}", task_name, other_name);
                         }
                     }

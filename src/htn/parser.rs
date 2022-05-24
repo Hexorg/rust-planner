@@ -1,4 +1,4 @@
-use std::{fmt, rc::Rc, convert::TryInto};
+use std::{fmt, rc::Rc, convert::TryInto, collections::HashMap};
 
 pub struct ParserError {
     line: usize,
@@ -294,7 +294,54 @@ pub enum Expr {
     Variable(String),
     Unary(Token, Box<Expr>), // Token right
     Assignment(String, Box<Expr>), // name, value
-    Call(Box<Expr>, Token, Vec<Expr>) // callee expr, closing parenthesis token, args
+    Call(String, Token, Vec<Expr>) // callee, closing parenthesis token, args
+}
+
+impl Expr {
+    pub fn eval(&self, state:&HashMap<String, i32>) -> i32 {
+        use TokenData::*;
+        match self {
+            Self::Binary(left, op, right) => {
+                let left = left.eval(state);
+                let right = right.eval(state);
+                match op.t {
+                    EQUALS_EQUALS => (left == right) as i32,
+                    MINUS => left - right,
+                    PLUS => left + right,
+                    SLASH => left / right,
+                    STAR => left * right,
+                    GREATER => (left > right) as i32,
+                    SMALLER => (left < right) as i32,
+                    GREATER_OR_EQUALS => (left >= right) as i32,
+                    SMALLER_OR_EQUALS => (left <= right) as i32,
+                    NOT_EQUALS => (left != right) as i32,
+                    OR => left | right,
+                    AND => left & right,
+                    _ => panic!("Unsupported operation"),
+                }
+            },
+            Self::Grouping(g) => g.eval(state),
+            Self::Literal(val) => *val,
+            Self::Variable(var) => *state.get(var).expect("Unknown variable name"),
+            Self::Unary(op, right) => if let NOT = op.t { !right.eval(state) } else { panic!("Unexpected unary operator")},
+            t @ _ => panic!("Unable to evaluation this expression type {:?}", t),
+        }
+    }
+
+    pub fn eval_mut(&self, state:&mut HashMap<String, i32>) -> i32 {
+        match self {
+            Self::Assignment(var, right) => {let r = right.eval(state); state.insert(var.clone(), r); r},
+            _ => self.eval(state)
+        }
+    }
+
+    pub fn is_call(&self) -> Option<&str> {
+        if let Self::Call(target, _,_) = self {
+            Some(target.as_str())
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -305,15 +352,21 @@ pub enum Stmt {
     Expression(Expr)
 }
 
+macro_rules! perror {
+    ($s:expr, $o:literal, $e:literal) => { 
+        {let line = $s.tokens[$s.idx-$o].line;
+        let col = $s.tokens[$s.idx-$o].col;
+        Err(ParserError{line, col, message:String::from($e)}).unwrap()}
+    }
+}
+
 macro_rules! pexpect {
     ($s:expr, $p:pat, $do:block, $e:literal) => {
         if let $p = &$s.tokens[$s.idx].t {
             $s.idx += 1;
             $do
         } else {
-            let line = $s.tokens[$s.idx].line;
-            let col = $s.tokens[$s.idx].col;
-            Err(ParserError{line, col, message:String::from($e)})
+            perror!($s, 0, $e)
         }
     }
 }
@@ -324,9 +377,7 @@ macro_rules! pexpect_prevtoken {
             $s.idx += 1;
             $do
         } else {
-            let line = $s.tokens[$s.idx-1].line;
-            let col = $s.tokens[$s.idx-1].col + $s.tokens[$s.idx-1].len - 1;
-            Err(ParserError{line, col, message:String::from($e)})
+            perror!($s, 1, $e)
         }
     }
 }
@@ -367,7 +418,11 @@ impl Parser {
             let mut args = Vec::<Expr>::new();
             loop { 
                 ptest!(self, TokenData::CLOSE_PAREN, {
-                    break Ok(Expr::Call(Box::new(expr), self.tokens[self.idx-1].clone(), args))
+                    break if let Expr::Variable(name) = expr {
+                        Ok(Expr::Call(name, self.tokens[self.idx-1].clone(), args))
+                    } else {
+                        perror!(self, 1, "Expected function name before call.")
+                    }
                 } else {
                     args.push(self.expression()?);
                 })
@@ -375,7 +430,6 @@ impl Parser {
         } else {
             Ok(expr)
         })
-
     }
     fn unary(&mut self) -> Result<Expr, ParserError> {
         ptest!(self, (TokenData::NOT | TokenData::MINUS), {
@@ -470,9 +524,7 @@ impl Parser {
             self.idx += 1;
             Ok(Expr::Variable(name.clone()))
         } else {
-            let line = self.tokens[self.idx].line;
-            let col = self.tokens[self.idx].col;
-            Err(ParserError{line, col, message:String::from("Expected expression.")})
+            perror!(self, 0, "Expected expression.")
         }
 
     }
@@ -607,7 +659,7 @@ impl Parser {
             Ok(tokens) => Parser{idx:0, tokens},
             Err(e) => { errors.push(e); return (ast, errors); }
         };
-        // Parser::print_tokens(&parser.tokens);
+        Parser::print_tokens(&parser.tokens);
         while parser.idx + 1 < parser.tokens.len() {
             match parser.statement() {
                 Err(e) => {errors.push(e); parser.error_recover(); },
