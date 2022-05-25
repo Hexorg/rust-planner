@@ -33,14 +33,21 @@ pub trait LinkedNode<'a> {
         gScore.insert(start.last_task_name.clone(), 0);
         fScore.insert(start.last_task_name.clone(), currentCost);
         openSet.push(start.clone(), Reverse(currentCost));
+        let mut is_first_iter = true;
         while openSet.len() > 0 {
             if let Some((current, _)) = openSet.pop() {
-                if goal.preconditions().as_ref().unwrap().eval(&current.s) == 1 {
+                if goal.preconditions().as_ref().unwrap().eval(&current.s).expect("Unexpected precondition expression") == 1 {
                     return Some(reconstruct_path(cameFrom, &current.last_task_name));
                 }
+
                 // println!("Getting neighbors of {}", current.last_task_name);
-                for nbr in domain.tasks.get(&current.last_task_name).unwrap().neighbors() {
-                    let task = domain.tasks.get(nbr).unwrap();
+                let task_map = if is_first_iter {
+                    is_first_iter = false;
+                    domain.tasks.get(&current.last_task_name).expect(format!("Unexpected task name {}", current.last_task_name).as_str()).neighbors().map(|nbr| domain.tasks.get(nbr)).collect()
+                } else {
+                    vec![goal].iter().map(|i| i).collect()
+                };
+                for task in task_map {
                     let tentative_gScore = gScore[&current.last_task_name] + task.cost();
                     let mut new_state = State{s:current.s.clone(), last_task_name:task.name.clone()};
                     task.effects().iter().for_each(|e| {e.eval_mut(&mut new_state.s);});

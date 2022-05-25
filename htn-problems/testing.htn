@@ -1,28 +1,46 @@
 task Main:
-    method eat(isHungry):
-        Eat()
-    method wait:
-        wait()
+    method Attack(WsCanSeeEnemy): # name(conditions)
+        AttackEnemy()
+    else: # syntactic sugar for "method bla(!WsCanSeeEnemy)"
+        ChooseBridgeToCheck()
+        NavigateToBridge()
+        CheckBridge()
 
-task Eat:
-    method EatFromPocket(haveFood):
-        EatFromPocket()
-    method EatFromRestaurant(!haveFood & atRestaurant):
-        EatFromRestaurant()
+task AttackEnemy:
+    method AttackWithTrunk(WsTrunkHealth > 0):
+        NavigateToEnemy()
+        DoTrunkSlam()
 
-task EatFromPocket:
-    eat_from_pocket()
+#   method default:
+#        FindTrunk()
+#        NavigateToTrunk()
+#        UprootTrunk()
+#        AttackEnemy()
+
+
+task DoTrunkSlam:
+    DoTrunkSlamOperator()
 effects:
-    isHungry = false
-    haveFood = false
+    WsTrunkHealth -= 1
 
-task EatFromRestaurant(atRestaurant):
-    eat_from_restaurant()
-effects:
-    isHungry = false
 
-task GotoRestaurant(!atRestaurant):
-    target = findRestaurant()
-    goto(target)
+task FindTrunk:
+    trunk = FindTrunkOperator() # Operator results can be stored in blackboard
 effects:
-    atRestaurant = true
+    foundTrunk = true # not needed if the sequence is always the same
+
+task NavigateToEnemy:
+    NavigateTo(enemy) # blackboard is prefilled with certain knowledge
+
+
+task NavigateToTrunk(foundTrunk):
+    NavigateTo(trunk)
+effects:
+    atTrunk = true
+
+
+task UprootTrunk(atTrunk):
+    UprootTrunkOperator(trunk)
+effects:
+    WsTrunkHealth = 3
+    

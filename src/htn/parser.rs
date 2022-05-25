@@ -1,4 +1,4 @@
-use std::{fmt, rc::Rc, convert::TryInto, collections::HashMap};
+use std::{fmt::{self, Write}, rc::Rc, convert::TryInto, collections::{HashMap, btree_map::Values}};
 
 pub struct ParserError {
     line: usize,
@@ -289,48 +289,69 @@ impl Lexer {
 #[derive(Clone, Debug)]
 pub enum Expr {
     Binary(Box<Expr>, Token, Box<Expr>), // left Token right
-    Grouping(Box<Expr>), // e.g. '(' expression ')'
-    Literal(i32),
-    Variable(String),
+    Grouping(Box<Expr>, Token), // e.g. '(' expression ')'
+    Literal(i32, Token),
+    Variable(String, Token),
     Unary(Token, Box<Expr>), // Token right
-    Assignment(String, Box<Expr>), // name, value
+    Assignment(String, Box<Expr>, Token), // name, value
     Call(String, Token, Vec<Expr>) // callee, closing parenthesis token, args
 }
 
+impl std::fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Binary(left, op, right) => write!(f, "{} {} {}", left, op, right),
+            Self::Grouping(g, _) => write!(f, "({})", g),
+            Self::Literal(val, _) => write!(f, "{}", val),
+            Self::Variable(var, _) => write!(f, "{}", var),
+            Self::Unary(op, right) => write!(f, "{}{}", op, right),
+            Self::Assignment(val, right, _) => write!(f, "{} = {}", val, right),
+            Self::Call(func, _, args) => write!(f, "{}({})", func, args.iter().fold(String::new(), |mut acc, item| {acc += &format!("{},", item); acc})),
+        }
+    }
+}
+
 impl Expr {
-    pub fn eval(&self, state:&HashMap<String, i32>) -> i32 {
+    pub fn eval(&self, state:&HashMap<String, i32>) -> Result<i32, ParserError> {
         use TokenData::*;
         match self {
             Self::Binary(left, op, right) => {
-                let left = left.eval(state);
-                let right = right.eval(state);
+                let left = left.eval(state)?;
+                let right = right.eval(state)?;
                 match op.t {
-                    EQUALS_EQUALS => (left == right) as i32,
-                    MINUS => left - right,
-                    PLUS => left + right,
-                    SLASH => left / right,
-                    STAR => left * right,
-                    GREATER => (left > right) as i32,
-                    SMALLER => (left < right) as i32,
-                    GREATER_OR_EQUALS => (left >= right) as i32,
-                    SMALLER_OR_EQUALS => (left <= right) as i32,
-                    NOT_EQUALS => (left != right) as i32,
-                    OR => left | right,
-                    AND => left & right,
-                    _ => panic!("Unsupported operation"),
+                    EQUALS_EQUALS => Ok((left == right) as i32),
+                    MINUS => Ok(left - right),
+                    PLUS => Ok(left + right),
+                    SLASH => Ok(left / right),
+                    STAR => Ok(left * right),
+                    GREATER => Ok((left > right) as i32),
+                    SMALLER => Ok((left < right) as i32),
+                    GREATER_OR_EQUALS => Ok((left >= right) as i32),
+                    SMALLER_OR_EQUALS => Ok((left <= right) as i32),
+                    NOT_EQUALS => Ok((left != right) as i32),
+                    OR => Ok(left | right),
+                    AND => Ok(left & right),
+                    _ => Err(ParserError{line:op.line, col:op.col, message:String::from("Unsupported operation.")}),
                 }
             },
-            Self::Grouping(g) => g.eval(state),
-            Self::Literal(val) => *val,
-            Self::Variable(var) => *state.get(var).expect("Unknown variable name"),
-            Self::Unary(op, right) => if let NOT = op.t { if right.eval(state) == 0 { 1 } else { 0} } else { panic!("Unexpected unary operator")},
-            t @ _ => panic!("Unable to evaluate this expression type {:?}", t),
+            Self::Grouping(g, _) => Ok(g.eval(state)?),
+            Self::Literal(val, _) => Ok(*val),
+            Self::Variable(var, tok) => if let Some(val) = state.get(var) {
+                Ok(*val)
+            } else {
+                Err(ParserError{line:tok.line, col:tok.col, message:String::from("Unknown variable name.")})
+            },
+            Self::Unary(op, right) => if let NOT = op.t { if right.eval(state)? == 0 { Ok(1) } else { Ok(0) } } else { 
+                Err(ParserError{line:op.line, col:op.col, message:String::from("Unexpected unary operator.")})
+            },
+            Expr::Call(_, tok, _) | Expr::Assignment(_,_,tok) => Err(ParserError{line:tok.line, col:tok.col, message:String::from("Unable to evaluate this expression.")}),
+            
         }
     }
 
-    pub fn eval_mut(&self, state:&mut HashMap<String, i32>) -> i32 {
+    pub fn eval_mut(&self, state:&mut HashMap<String, i32>) -> Result<i32, ParserError> {
         match self {
-            Self::Assignment(var, right) => {let r = right.eval(state); state.insert(var.clone(), r); r},
+            Self::Assignment(var, right, _) => {let r = right.eval(state)?; state.insert(var.clone(), r); Ok(r)},
             _ => self.eval(state)
         }
     }
@@ -342,21 +363,44 @@ impl Expr {
             None
         }
     }
+
+    pub fn to_err(&self, msg:String) -> ParserError {
+        match self {
+            Expr::Binary(_, tok, _) |
+            Expr::Grouping(_, tok) |
+            Expr::Literal(_, tok) |
+            Expr::Variable(_, tok) |
+            Expr::Unary(tok, _) |
+            Expr::Assignment(_, _, tok) |
+            Expr::Call(_, tok, _) => ParserError{line:tok.line, col:tok.col, message:msg}
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Method(String, Option<Expr>, Box<Stmt>), // Name, condition, subtasks
-    Task(String, Option<Expr>, Box<Stmt>, Option<Box<Stmt>>), // Name, condition, methods, effects
+    Method(String, Option<Expr>, Box<Stmt>, Token), // Name, condition, subtasks
+    Task(String, Option<Expr>, Box<Stmt>, Option<Box<Stmt>>, Token), // Name, condition, methods, effects
     Block(Vec<Stmt>),
     Expression(Expr)
+}
+
+impl Stmt {
+    pub fn to_err(&self, msg:String) -> ParserError {
+        match self {
+            Stmt::Method(_, _, _, tok) |
+            Stmt::Task(_, _, _, _, tok) => ParserError{line:tok.line, col:tok.col, message:msg},
+            Stmt::Block(blk) => blk.first().expect("Unable to generate error for empty block.").to_err(msg),
+            Stmt::Expression(e) => e.to_err(msg),
+        }
+    }
 }
 
 macro_rules! perror {
     ($s:expr, $o:literal, $e:literal) => { 
         {let line = $s.tokens[$s.idx-$o].line;
         let col = $s.tokens[$s.idx-$o].col;
-        Err(ParserError{line, col, message:String::from($e)}).unwrap()}
+        Err(ParserError{line, col, message:String::from($e)})}
     }
 }
 
@@ -418,7 +462,7 @@ impl Parser {
             let mut args = Vec::<Expr>::new();
             loop { 
                 ptest!(self, TokenData::CLOSE_PAREN, {
-                    break if let Expr::Variable(name) = expr {
+                    break if let Expr::Variable(name, _) = expr {
                         Ok(Expr::Call(name, self.tokens[self.idx-1].clone(), args))
                     } else {
                         perror!(self, 1, "Expected function name before call.")
@@ -487,16 +531,18 @@ impl Parser {
             | TokenData::SUBTRACT_FROM
             | TokenData::DIVIDE_BY
             | TokenData::MULTIPLY_BY), {
-                if let Expr::Variable(varname) = &target {
+                if let Expr::Variable(varname, _) = &target {
+                    let line = self.tokens[self.idx].line;
+                    let col = self.tokens[self.idx].col;
                     let value_expr = match self.tokens[self.idx].t {
                         // TokenData::EQUALS => self.expression()?,
-                        TokenData::ADD_TO => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::PLUS}, Box::new(self.expression()?)),
-                        TokenData::SUBTRACT_FROM => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::MINUS}, Box::new(self.expression()?)),
-                        TokenData::MULTIPLY_BY => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::STAR}, Box::new(self.expression()?)),
-                        TokenData::DIVIDE_BY => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line:0, col:0, len:0, t:TokenData::SLASH}, Box::new(self.expression()?)),
+                        TokenData::ADD_TO => Expr::Binary(Box::new(Expr::Variable(varname.clone(), self.tokens[self.idx].clone())), Token{line, col, len:0, t:TokenData::PLUS}, Box::new(self.expression()?)),
+                        TokenData::SUBTRACT_FROM => Expr::Binary(Box::new(Expr::Variable(varname.clone(), self.tokens[self.idx].clone())), Token{line, col, len:0, t:TokenData::MINUS}, Box::new(self.expression()?)),
+                        TokenData::MULTIPLY_BY => Expr::Binary(Box::new(Expr::Variable(varname.clone(), self.tokens[self.idx].clone())), Token{line, col, len:0, t:TokenData::STAR}, Box::new(self.expression()?)),
+                        TokenData::DIVIDE_BY => Expr::Binary(Box::new(Expr::Variable(varname.clone(), self.tokens[self.idx].clone())), Token{line, col, len:0, t:TokenData::SLASH}, Box::new(self.expression()?)),
                         _ => self.expression()?,
                     };
-                    Ok(Expr::Assignment(varname.clone(), Box::new(value_expr)))
+                    Ok(Expr::Assignment(varname.clone(), Box::new(value_expr), self.tokens[self.idx].clone()))
                 } else {
                     let line = self.tokens[self.idx].line;
                     let col = self.tokens[self.idx].col;
@@ -513,16 +559,16 @@ impl Parser {
         // Literal | "(" expression ")"
         if let TokenData::LITERAL(val)  = self.tokens[self.idx].t {
             self.idx += 1;
-            Ok(Expr::Literal(val))
+            Ok(Expr::Literal(val, self.tokens[self.idx].clone()))
         } else if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
             self.idx += 1;
             let expr = self.expression()?;
             pexpect!(self, TokenData::CLOSE_PAREN, {
-                Ok(Expr::Grouping(Box::new(expr)))
+                Ok(Expr::Grouping(Box::new(expr), self.tokens[self.idx].clone()))
             }, "Expected ')' after expression.")
         } else if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
             self.idx += 1;
-            Ok(Expr::Variable(name.clone()))
+            Ok(Expr::Variable(name.clone(), self.tokens[self.idx-1].clone()))
         } else {
             perror!(self, 0, "Expected expression.")
         }
@@ -543,7 +589,7 @@ impl Parser {
                 let task_block = self.statement()?;
                 let mut effects_block = None;
                 pmatch!(self, TokenData::EFFECTS, {effects_block = Some(Box::new(self.effects_statement()?));});
-                Ok(Stmt::Task(name, conditions, Box::new(task_block), effects_block))
+                Ok(Stmt::Task(name, conditions, Box::new(task_block), effects_block, self.tokens[self.idx].clone()))
             }, "Expected ':' after task label.")
         }, "Expected label after 'task'.")
         
@@ -581,11 +627,11 @@ impl Parser {
                 pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after method conditions.'")?;
             });
             pexpect_prevtoken!(self, TokenData::COLON, {
-                let parent_statemet = Stmt::Method(name.clone(), conditions.clone(), Box::new(self.statement()?));
+                let parent_statemet = Stmt::Method(name.clone(), conditions.clone(), Box::new(self.statement()?), self.tokens[self.idx].clone());
                 ptest!(self, TokenData::ELSE, {
                     pexpect!(self, TokenData::COLON, {
                         let else_conditions = Expr::Unary(Token{line:0, col:0, len:0, t:TokenData::NOT}, Box::new(conditions.unwrap()));
-                        let else_statement = Stmt::Method(format!("Dont{}", name), Some(else_conditions), Box::new(self.statement()?));
+                        let else_statement = Stmt::Method(format!("Dont{}", name), Some(else_conditions), Box::new(self.statement()?), self.tokens[self.idx].clone());
                         Ok(Stmt::Block(vec![parent_statemet, else_statement]))
                     }, "Expected ':' after else clause.")
                 } else {
@@ -638,18 +684,16 @@ impl Parser {
             }
         ));
     }
-    pub fn print_parse_errors(errors: Vec<ParserError>, htn_source:&str, filepath:&str) {
+    pub fn print_parse_errors(e: &ParserError, htn_source:&str, filepath:&str) {
         let mut lines = htn_source.lines();
         let mut last_error_line = 0;
-        for e in errors {
-            if let Some(eline) = lines.nth(e.line - last_error_line-1) {
-                let line_number_string = format!("{}", e.line);
-                eprintln!("{}:{} Error:", filepath, e.line); 
-                eprintln!("\t{}: {}", line_number_string, eline);
-                last_error_line = e.line;
-                let debug_str_col_pos = line_number_string.len() + 2 + e.col;
-                eprintln!("\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos); 
-            }
+        if let Some(eline) = lines.nth(e.line - last_error_line-1) {
+            let line_number_string = format!("{}", e.line);
+            eprintln!("{}:{} Error:", filepath, e.line); 
+            eprintln!("\t{}: {}", line_number_string, eline);
+            last_error_line = e.line;
+            let debug_str_col_pos = line_number_string.len() + 2 + e.col;
+            eprintln!("\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos); 
         }
     }
     pub fn parse(htn_source: &str) -> (Vec<Stmt>, Vec<ParserError>) {
