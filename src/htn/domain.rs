@@ -13,13 +13,34 @@ impl fmt::Debug for DomainError {
     }
 }
 
+
 #[derive(Clone, Debug)]
 pub struct Method {
     pub name: String,
     pub preconditions:Option<Expr>, 
     pub dependencies:HashSet<String>,
     pub body:Vec<Expr>, 
-    neighbors: Vec<String>
+    neighbors: Vec<String>,
+    effects: Vec<Expr>,
+}
+
+
+impl<'a> LinkedNode<'a> for Method {
+    fn preconditions(&'a self) -> &'a Option<Expr> {
+        &self.preconditions
+    }
+
+    fn cost(&'a self) -> i32 {
+        5
+    }
+
+    fn effects(&'a self) -> &'a Vec<Expr> {
+        &self.effects
+    }
+
+    fn neighbors(&'a self) -> Iter<String> {
+        self.neighbors.iter()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +61,25 @@ pub struct Task {
     neighbors: Vec<String>
 }
 
+impl<'a> LinkedNode<'a> for Task {
+    fn preconditions(&'a self) -> &'a Option<Expr> {
+        &self.preconditions
+    }
+
+    fn effects(&'a self) -> &'a Vec<Expr> {
+        &self.effects
+    }
+
+    fn cost(&'a self) -> i32 {
+        5
+    }
+
+    fn neighbors(&'a self) -> Iter<String> {
+        self.neighbors.iter()
+    }
+}
+
+
 impl std::hash::Hash for Task {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.name.hash(state)
@@ -53,7 +93,7 @@ impl std::cmp::PartialEq for Task {
 }
 
 impl std::cmp::Eq for Task {
-    
+
 }
 
 enum ExpressionType {
@@ -82,16 +122,6 @@ impl std::fmt::Debug for Domain {
     }
 }
 
-impl Task {
-    pub fn neighbors<'a>(&self, domain:&'a Domain) -> Vec<(&'a Task, i32)> {
-        let mut r = Vec::new();
-        for n in &self.neighbors {
-            r.push((domain.tasks.get(n).unwrap(), 2));
-        }
-
-        r
-    }
-}
 
 impl Domain {
     fn build_task(&mut self, context: &mut Option<BuildContext>, name:String, preconditions:Option<Expr>, body:Box<Stmt>, effects:Option<Box<Stmt>>) -> Result<(), DomainError>  {
@@ -157,7 +187,7 @@ impl Domain {
             } else {
                 (None, HashSet::new())
             };
-            let me = Method{name, preconditions, dependencies, body, neighbors:Vec::new()};
+            let me = Method{name, preconditions, dependencies, body, neighbors:Vec::new(), effects:Vec::new()};
             match task_type {
                 Some(Primitive(_)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
                 Some(Composite(method_vec)) => method_vec.push(me),
@@ -176,11 +206,15 @@ impl Domain {
         use BuildContext::*;
         use TaskStatement::*;
         let mut new_context: &mut Option<BuildContext> = &mut None;
-        if let Some(Task(task_name, task_type)) = context {
-            match task_type {
-                Some(Composite(_)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
-                Some(Primitive(expr_vec)) => expr_vec.push(expr.clone()),
-                None => *task_type = Some(Primitive(vec!(expr.clone()))),
+        if let Some(build_context) = context {
+            match build_context {
+                Task(task_name, task_type) => match task_type {
+                    Some(Composite(_)) => return Err(DomainError{message:format!("Tasks can be either composite or primitive. Task {} is both.", task_name)}),
+                    Some(Primitive(expr_vec)) => expr_vec.push(expr.clone()),
+                    None => *task_type = Some(Primitive(vec!(expr.clone()))),
+                }
+                Method(method_body) => method_body.push(expr.clone()),
+                _ => new_context = context,
             }
         } else {
             new_context = context;
@@ -266,7 +300,7 @@ impl Domain {
         let mut domain = Domain{tasks: HashMap::new(), world_variables:HashSet::new(), blackboard_variables:HashSet::new(), operators:HashSet::new()};
         domain.pass(&ast)?;
         domain.optimize();
-        println!("{:?}", domain.tasks.keys());
+        // domain.tasks.iter().for_each(|(k, t)| println!("Task {} effects: {:?}, depends: {:?}", k, t.affects, t.dependencies));
         Ok(domain)
     }
 }

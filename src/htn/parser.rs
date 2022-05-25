@@ -323,8 +323,8 @@ impl Expr {
             Self::Grouping(g) => g.eval(state),
             Self::Literal(val) => *val,
             Self::Variable(var) => *state.get(var).expect("Unknown variable name"),
-            Self::Unary(op, right) => if let NOT = op.t { !right.eval(state) } else { panic!("Unexpected unary operator")},
-            t @ _ => panic!("Unable to evaluation this expression type {:?}", t),
+            Self::Unary(op, right) => if let NOT = op.t { if right.eval(state) == 0 { 1 } else { 0} } else { panic!("Unexpected unary operator")},
+            t @ _ => panic!("Unable to evaluate this expression type {:?}", t),
         }
     }
 
@@ -659,7 +659,7 @@ impl Parser {
             Ok(tokens) => Parser{idx:0, tokens},
             Err(e) => { errors.push(e); return (ast, errors); }
         };
-        Parser::print_tokens(&parser.tokens);
+        // Parser::print_tokens(&parser.tokens);
         while parser.idx + 1 < parser.tokens.len() {
             match parser.statement() {
                 Err(e) => {errors.push(e); parser.error_recover(); },
