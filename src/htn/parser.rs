@@ -1,4 +1,4 @@
-use std::{fmt::{self, Write}, rc::Rc, convert::TryInto, collections::{HashMap, btree_map::Values}};
+use std::{fmt::{self, Write}, rc::Rc, convert::TryInto, collections::{HashMap, btree_map::Values, HashSet}, ops::Deref};
 
 pub struct ParserError {
     line: usize,
@@ -58,7 +58,6 @@ pub struct Token {
     line: usize,
     col: usize,
     len: usize,
-    // tab_depth: usize,
     pub t: TokenData,
 }
 
@@ -71,37 +70,37 @@ impl fmt::Display for Token {
 impl fmt::Display for TokenData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TokenData::TASK => write!(f, "TASK"),
-            TokenData::METHOD => write!(f, "METHOD"),
-            TokenData::ELSE => write!(f, "ELSE"),
-            TokenData::EFFECTS => write!(f, "EFFECTS"),
-            TokenData::LABEL(l) => write!(f, "{}", l),
-            TokenData::LITERAL(l) => write!(f, "'{}'", l),
-            TokenData::EQUALS => write!(f, "="),
-            TokenData::EQUALS_EQUALS => write!(f, "=="),
-            TokenData::MINUS => write!(f, "-"),
-            TokenData::PLUS => write!(f, "+"),
-            TokenData::SLASH => write!(f, "/"),
-            TokenData::STAR => write!(f, "*"),
-            TokenData::GREATER => write!(f, ">"),
-            TokenData::SMALLER => write!(f, "<task>"),
-            TokenData::GREATER_OR_EQUALS => write!(f, ">="),
-            TokenData::SMALLER_OR_EQUALS => write!(f, "<="),
-            TokenData::NOT_EQUALS => write!(f, "!="),
-            TokenData::SUBTRACT_FROM => write!(f, "-="),
-            TokenData::ADD_TO => write!(f, "+="),
-            TokenData::MULTIPLY_BY => write!(f, "*="),
-            TokenData::DIVIDE_BY => write!(f, "/="),
-            TokenData::OR => write!(f, "|"),
-            TokenData::AND => write!(f, "&"),
-            TokenData::NOT => write!(f, "!"),
-            TokenData::OPEN_PAREN => write!(f, "("),
-            TokenData::CLOSE_PAREN => write!(f, ")"),
-            TokenData::COLON => write!(f, ":"),
-            TokenData::BLOCK_START => write!(f, "{{"),
-            TokenData::BLOCK_END => write!(f, "}}"),
-            TokenData::STATEMENT_END => write!(f, ";"),
-            TokenData::EOF => write!(f, "<<EOF"),
+            Self::TASK => write!(f, "TASK"),
+            Self::METHOD => write!(f, "METHOD"),
+            Self::ELSE => write!(f, "ELSE"),
+            Self::EFFECTS => write!(f, "EFFECTS"),
+            Self::LABEL(l) => write!(f, "{}", l),
+            Self::LITERAL(l) => write!(f, "'{}'", l),
+            Self::EQUALS => write!(f, "="),
+            Self::EQUALS_EQUALS => write!(f, "=="),
+            Self::MINUS => write!(f, "-"),
+            Self::PLUS => write!(f, "+"),
+            Self::SLASH => write!(f, "/"),
+            Self::STAR => write!(f, "*"),
+            Self::GREATER => write!(f, ">"),
+            Self::SMALLER => write!(f, "<task>"),
+            Self::GREATER_OR_EQUALS => write!(f, ">="),
+            Self::SMALLER_OR_EQUALS => write!(f, "<="),
+            Self::NOT_EQUALS => write!(f, "!="),
+            Self::SUBTRACT_FROM => write!(f, "-="),
+            Self::ADD_TO => write!(f, "+="),
+            Self::MULTIPLY_BY => write!(f, "*="),
+            Self::DIVIDE_BY => write!(f, "/="),
+            Self::OR => write!(f, "|"),
+            Self::AND => write!(f, "&"),
+            Self::NOT => write!(f, "!"),
+            Self::OPEN_PAREN => write!(f, "("),
+            Self::CLOSE_PAREN => write!(f, ")"),
+            Self::COLON => write!(f, ":"),
+            Self::BLOCK_START => write!(f, "{{"),
+            Self::BLOCK_END => write!(f, "}}"),
+            Self::STATEMENT_END => write!(f, ";"),
+            Self::EOF => write!(f, "<<EOF"),
         }
     }
 }
@@ -291,10 +290,10 @@ pub enum Expr {
     Binary(Box<Expr>, Token, Box<Expr>), // left Token right
     Grouping(Box<Expr>, Token), // e.g. '(' expression ')'
     Literal(i32, Token),
-    Variable(String, Token),
+    Variable(Rc<String>, Token),
     Unary(Token, Box<Expr>), // Token right
-    Assignment(String, Box<Expr>, Token), // name, value
-    Call(String, Token, Vec<Expr>) // callee, closing parenthesis token, args
+    Assignment(Rc<String>, Box<Expr>, Token), // name, value
+    Call(Rc<String>, Token, Vec<Expr>) // callee, closing parenthesis token, args
 }
 
 impl std::fmt::Display for Expr {
@@ -306,13 +305,18 @@ impl std::fmt::Display for Expr {
             Self::Variable(var, _) => write!(f, "{}", var),
             Self::Unary(op, right) => write!(f, "{}{}", op, right),
             Self::Assignment(val, right, _) => write!(f, "{} = {}", val, right),
-            Self::Call(func, _, args) => write!(f, "{}({})", func, args.iter().fold(String::new(), |mut acc, item| {acc += &format!("{},", item); acc})),
+            Self::Call(func, _, args) => {
+                write!(f, "{}(", func)?; 
+                args.iter().take(1).try_for_each(|expr| write!(f, "{}", expr))?;
+                args.iter().skip(1).try_for_each(|expr| write!(f, ", {}", expr))?; 
+                write!(f, ")")
+            },
         }
     }
 }
 
 impl Expr {
-    pub fn eval(&self, state:&HashMap<String, i32>) -> Result<i32, ParserError> {
+    pub fn eval(&self, state:&HashMap<Rc<String>, i32>) -> Result<i32, ParserError> {
         use TokenData::*;
         match self {
             Self::Binary(left, op, right) => {
@@ -349,14 +353,36 @@ impl Expr {
         }
     }
 
-    pub fn eval_mut(&self, state:&mut HashMap<String, i32>) -> Result<i32, ParserError> {
+    pub fn eval_mut(&self, state:&mut HashMap<Rc<String>, i32>) -> Result<i32, ParserError> {
         match self {
             Self::Assignment(var, right, _) => {let r = right.eval(state)?; state.insert(var.clone(), r); Ok(r)},
             _ => self.eval(state)
         }
     }
 
-    pub fn is_call(&self) -> Option<&str> {
+    pub fn world_variables(&self) -> HashSet<Rc<String>> {
+        let mut vars = HashSet::new();
+        match self {
+            Self::Binary(left, _, right) => {vars.extend(left.world_variables()); vars.extend(right.world_variables()); },
+            Self::Grouping(sub, _) |
+            Self::Unary(_, sub) => vars.extend(sub.world_variables()),
+            Self::Assignment(var, sub, _) => {vars.insert(var.clone()); vars.extend(sub.world_variables());},
+            Self::Variable(var, _) => {vars.insert(var.clone());},
+            Self::Literal(_, _) |
+            Self::Call(_, _, _) => (),
+        }
+        vars
+    }
+
+    pub fn get_assignment_target(&self) -> Option<&str> {
+        if let Self::Assignment(target, _,_) = self {
+            Some(target.as_str())
+        } else {
+            None
+        }
+    }
+
+    pub fn get_call_target(&self) -> Option<&str> {
         if let Self::Call(target, _,_) = self {
             Some(target.as_str())
         } else {
@@ -375,23 +401,124 @@ impl Expr {
             Expr::Call(_, tok, _) => ParserError{line:tok.line, col:tok.col, message:msg}
         }
     }
+
+    pub fn line_no(&self) -> usize {
+        match self {
+            Expr::Binary(_, tok, _) |
+            Expr::Grouping(_, tok) |
+            Expr::Literal(_, tok) |
+            Expr::Variable(_, tok) |
+            Expr::Unary(tok, _) |
+            Expr::Assignment(_, _, tok) |
+            Expr::Call(_, tok, _) => tok.line
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Method(String, Option<Expr>, Box<Stmt>, Token), // Name, condition, subtasks
-    Task(String, Option<Expr>, Box<Stmt>, Option<Box<Stmt>>, Token), // Name, condition, methods, effects
+    Method{name:Rc<String>, preconditions:Option<Expr>, body:Box<Stmt>, token:Token}, // Name, condition, subtasks
+    Task{name:Rc<String>, preconditions:Option<Expr>, body:Box<Stmt>, effects:Option<Box<Stmt>>, token:Token}, // Name, condition, methods, effects
     Block(Vec<Stmt>),
     Expression(Expr)
 }
 
+pub struct StmtFormatter<'a> {
+    pub max_line_count: usize,
+    pub depth: usize,
+    pub stmt: &'a Stmt
+}
+
+impl std::fmt::Display for StmtFormatter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let new_depth = self.depth + 2;
+        match self.stmt {
+            Stmt::Method{ name, preconditions:Some(preconditions), body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}):{}", self.stmt.line_no(), ' ', token, name, preconditions, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Method{ name, preconditions:None, body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}:{}", self.stmt.line_no(), ' ', token, name, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Task{ name, preconditions:Some(preconditions), body, effects, token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}):{}", self.stmt.line_no(), ' ',token, name, preconditions, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Task{ name, preconditions:None, body, effects, token } => write!(f, "{:>lc$}: {:>depth$}{} {}:{}", self.stmt.line_no(), ' ',token, name, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Block(blk) => {
+                
+                write!(f, "\n")?;
+                blk.iter().try_for_each(|stmt| write!(f, "{}", StmtFormatter{depth:new_depth, stmt, max_line_count:self.max_line_count}))
+                // write!(f, "block_end\n")
+            },
+            Stmt::Expression(e) => write!(f, "{:>lc$}: {:>depth$}{}\n", self.stmt.line_no(), ' ', e, depth=self.depth, lc=self.max_line_count),
+        }
+    }
+}
+
+
 impl Stmt {
     pub fn to_err(&self, msg:String) -> ParserError {
         match self {
-            Stmt::Method(_, _, _, tok) |
-            Stmt::Task(_, _, _, _, tok) => ParserError{line:tok.line, col:tok.col, message:msg},
+            Stmt::Method{token,..} |
+            Stmt::Task{token,..} => ParserError{line:token.line, col:token.col, message:msg},
             Stmt::Block(blk) => blk.first().expect("Unable to generate error for empty block.").to_err(msg),
             Stmt::Expression(e) => e.to_err(msg),
+        }
+    }
+
+    pub fn line_no(&self) -> usize {
+        match self {
+            Self::Method{token,..} |
+            Self::Task{token,..} => token.line,
+            Stmt::Block(blk) => blk.first().expect("Unable to get line for empty block").line_no(),
+            Stmt::Expression(e) => e.line_no()
+        }
+    }
+    pub fn name(&self) -> Result<Rc<String>, ParserError> {
+        match self {
+            Self::Method{name, ..} |
+            Self::Task{name, ..} => Ok(name.clone()),
+            _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
+        }
+    }
+
+    pub fn affects(&self) -> HashSet<Rc<String>> {
+        let mut result = HashSet::new();
+        match self {
+            Self::Task{effects:Some(effects),..} => result.extend(effects.affects()),
+            Self::Block(blk) => blk.iter().for_each(|stmt| result.extend(stmt.affects())),
+            Self::Expression(e) => result.extend(e.world_variables()),
+            Self::Method{..} | Self::Task{..} => (),
+        }
+        result
+    }
+
+    pub fn depends(&self) -> HashSet<Rc<String>> {
+        let mut result = HashSet::new();
+        match self {
+            Stmt::Method{preconditions:Some(preconditions), ..} |
+            Stmt::Task{preconditions:Some(preconditions),..} => result.extend(preconditions.world_variables()),
+            Stmt::Block(blk) => blk.iter().for_each(|stmt| result.extend(stmt.depends())),
+            _ => (),
+        }
+        result
+    }
+
+    pub fn for_each_method<'a, F>(&'a self, mut func:F) where F: FnMut(&'a Self) {
+        match self {
+            Self::Task{body,..} => body.for_each_method(func),
+            Self::Block(blk) => for stmt in blk { func(stmt) },
+            Self::Method{..} => func(self),
+            _ => (),
+        }
+    }
+
+
+    pub fn preconditions(&self) -> Result<&Option<Expr>, ParserError> {
+        match &self {
+            Self::Method{preconditions, ..} |
+            Self::Task{preconditions, ..} => Ok(preconditions),
+            _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
+        }
+    }
+
+    pub fn effects(&self) -> Result<&Option<Box<Stmt>>, ParserError> {
+        match &self {
+            Self::Task{effects,..} => Ok(effects),
+            _ => Err(self.to_err(String::from("Only tasks have effects")))
         }
     }
 }
@@ -568,7 +695,7 @@ impl Parser {
             }, "Expected ')' after expression.")
         } else if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
             self.idx += 1;
-            Ok(Expr::Variable(name.clone(), self.tokens[self.idx-1].clone()))
+            Ok(Expr::Variable(Rc::new(name.clone()), self.tokens[self.idx-1].clone()))
         } else {
             perror!(self, 0, "Expected expression.")
         }
@@ -578,18 +705,19 @@ impl Parser {
         pexpect_prevtoken!(self, TokenData::COLON, {self.statement()}, "Expected ':' after 'effects'.")
     }
     fn task_statement(&mut self) -> Result<Stmt, ParserError> {
+        let token_id = self.idx-1;
         pexpect!(self, TokenData::LABEL(name), {
-            let name = name.clone();
-            let mut conditions : Option<Expr> = None;
+            let name = Rc::new(name.clone());
+            let mut preconditions = None;
             pmatch!(self, TokenData::OPEN_PAREN, {
-                conditions = Some(self.expression()?);
+                preconditions = Some(self.expression()?);
                 pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after task conditions.")?
             });
             pexpect_prevtoken!(self, TokenData::COLON, {
-                let task_block = self.statement()?;
-                let mut effects_block = None;
-                pmatch!(self, TokenData::EFFECTS, {effects_block = Some(Box::new(self.effects_statement()?));});
-                Ok(Stmt::Task(name, conditions, Box::new(task_block), effects_block, self.tokens[self.idx].clone()))
+                let body = Box::new(self.statement()?);
+                let mut effects = None;
+                pmatch!(self, TokenData::EFFECTS, {effects = Some(Box::new(self.effects_statement()?));});
+                Ok(Stmt::Task{name, preconditions, body, effects, token:self.tokens[token_id].clone()})
             }, "Expected ':' after task label.")
         }, "Expected label after 'task'.")
         
@@ -619,24 +747,30 @@ impl Parser {
         
     }
     fn method_statement(&mut self) -> Result<Stmt, ParserError> {
+        let token_id = self.idx-1;
         pexpect!(self, TokenData::LABEL(name), {
-            let name = name.clone();
-            let mut conditions: Option<Expr> = None;
+            let name = Rc::new(name.clone());
+            let mut preconditions: Option<Expr> = None;
             pmatch!(self, TokenData::OPEN_PAREN, {
-                conditions = Some(self.expression()?);
+                preconditions = Some(self.expression()?);
                 pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after method conditions.'")?;
             });
             pexpect_prevtoken!(self, TokenData::COLON, {
-                let parent_statemet = Stmt::Method(name.clone(), conditions.clone(), Box::new(self.statement()?), self.tokens[self.idx].clone());
-                ptest!(self, TokenData::ELSE, {
-                    pexpect!(self, TokenData::COLON, {
-                        let else_conditions = Expr::Unary(Token{line:0, col:0, len:0, t:TokenData::NOT}, Box::new(conditions.unwrap()));
-                        let else_statement = Stmt::Method(format!("Dont{}", name), Some(else_conditions), Box::new(self.statement()?), self.tokens[self.idx].clone());
-                        Ok(Stmt::Block(vec![parent_statemet, else_statement]))
-                    }, "Expected ':' after else clause.")
+                let parent_statemet = Stmt::Method{name:name.clone(), preconditions:preconditions.clone(), body:Box::new(self.statement()?), token:self.tokens[token_id].clone()};
+                if preconditions.is_some() {
+                    ptest!(self, TokenData::ELSE, {
+                        let token_id = self.idx-1;
+                        pexpect!(self, TokenData::COLON, {
+                            let else_conditions = Expr::Unary(Token{line:self.tokens[token_id].line, col:self.tokens[token_id].col, len:0, t:TokenData::NOT}, Box::new(preconditions.unwrap()));
+                            let else_statement = Stmt::Method{name:Rc::new(format!("Dont{}", name)), preconditions:Some(else_conditions), body:Box::new(self.statement()?), token:self.tokens[token_id].clone()};
+                            Ok(Stmt::Block(vec![parent_statemet, else_statement]))
+                        }, "Expected ':' after else clause.")
+                    } else {
+                        Ok(parent_statemet)
+                    })
                 } else {
-                    Ok(parent_statemet)
-                })
+                    Err(parent_statemet.to_err(String::from("'else' for a method without preconditions will never run.")))
+                }
             }, "Expected ':' after method declaration.")
         }, "Expected method name.")
     }

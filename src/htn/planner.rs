@@ -1,8 +1,8 @@
-use std::{collections::HashMap, ops::Deref};
+use std::{collections::HashMap};
 
 use crate::htn::search::Astar;
 
-use super::{domain::Domain, parser::{Expr, TokenData, ParserError}};
+use super::{domain::Domain, parser::{Expr, ParserError}};
 
 #[derive(Debug, Clone)]
 pub struct State {
@@ -26,7 +26,7 @@ impl std::cmp::Eq for State {
 
 }
 pub struct Planner<'a> {
-    domain: &'a Domain,
+    domain: &'a Domain<'a>,
     state: State,
     blackboard: HashMap<String, i32>,
     plan: Vec<String>
