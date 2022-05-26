@@ -11,11 +11,10 @@ task AttackEnemy:
         NavigateToEnemy()
         DoTrunkSlam()
 
-#   method default:
+#    method default:
 #        FindTrunk()
 #        NavigateToTrunk()
 #        UprootTrunk()
-#        AttackEnemy()
 
 
 task DoTrunkSlam:

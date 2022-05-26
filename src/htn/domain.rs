@@ -1,4 +1,4 @@
-use std::{fs, fmt::Debug,  collections::HashMap, rc::Rc};
+use std::{fs, fmt::Debug,  collections::HashMap, rc::Rc, ops::Deref};
 use super::parser::{Parser, Stmt, ParserError, StmtFormatter};
 
 #[derive(Debug)]
@@ -6,6 +6,7 @@ use super::parser::{Parser, Stmt, ParserError, StmtFormatter};
 pub struct Domain {
     pub tasks: HashMap<Rc<String>, Stmt>,
     pub neighbors: HashMap<Rc<String>, Vec<Rc<String>>>,
+    pub main: Rc<String>,
     pub filepath: String,
     pub content: String,
 }
@@ -44,18 +45,28 @@ impl Domain {
             for (other_name, other) in tasks.iter() {
                 if task_name != other_name {
                     let affects = other.affects();
-                    task.for_each_method(|method| if affects.intersection(&method.depends()).count() > 0 {
+                    task.for_each_method(&mut |method| if affects.intersection(&method.depends()).count() > 0 {
+                        println!("{} enables {}.{}", other_name, task_name, method.name().unwrap());
                         neighbors.push(method.name().unwrap())
                     });
                     // if task effects other's preconditions
-                    if affects.intersection(&other.depends()).count() > 0 {
-                        neighbors.push(other.name().unwrap());
-                        // task.neighbors.push(other_name.clone());
-                        println!("{} enables {}", task_name, other_name);
+                    if affects.intersection(&task.depends()).count() > 0 {
+                        neighbors.push(other_name.clone());
+                        println!("{} enables {}", other_name, task_name);
                     }
                 }
             }
             result.insert(task_name.clone(), neighbors);
+            task.for_each_method(&mut |method| {
+                let depends = method.depends();
+                let mut neighbors:Vec<Rc<String>> = Vec::new();
+                for (other_name, other) in tasks.iter() {
+                    if other.affects().intersection(&depends).count() > 0 {
+                        neighbors.push(other_name.clone())
+                    }
+                }
+                result.insert(method.name().unwrap(), neighbors);
+            });
         }
         result
     }
@@ -69,11 +80,20 @@ impl Domain {
         let (ast, errors) = Parser::parse(content.as_str());
         errors.iter().for_each(|e| Parser::print_parse_errors(e, content.as_str(), filepath));
         let mut tasks = HashMap::new();
+        let mut main = None;
         for stmt in ast {
-            tasks.insert(stmt.name()?, stmt);
+            let name = stmt.name()?;
+            if name.deref().eq("Main") {
+                main = Some(name.clone());
+            }
+      
+            // stmt.for_each_method(&mut |method| {tasks.insert(method.name().unwrap().clone(), method.clone());});
+            tasks.insert(name, stmt);
+            
         }
+    
         let neighbors = Domain::create_links(&tasks);
-        let domain = Domain{tasks, neighbors, content, filepath:String::from(filepath)};
+        let domain = Domain{tasks, main:main.unwrap(), neighbors, content, filepath:String::from(filepath)};
         Ok(domain)
     }
 }

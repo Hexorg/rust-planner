@@ -1,24 +1,20 @@
-use std::{collections::HashMap};
+use std::{collections::HashMap, rc::Rc};
 
-use crate::htn::search::Astar;
 
-use super::{domain::Domain, parser::{Expr, ParserError}};
+use super::{domain::Domain, search::Astar, parser::{Stmt, Expr, ParserError}};
 
 #[derive(Debug, Clone)]
-pub struct State {
-    pub s: HashMap<String, i32>,
-    pub last_task_name: String
-}
+pub struct State(pub HashMap<Rc<String>, i32>);
 
 impl std::hash::Hash for State {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.s.values().for_each(|val| val.hash(state))
+        self.0.values().for_each(|val| val.hash(state))
     }
 }
 impl std::cmp::PartialEq for State {
     fn eq(&self, other: &Self) -> bool {
         let mut result = false;
-        self.s.values().zip(other.s.values()).fold(&mut result, |acc, (left, right)| {*acc &=  left == right; acc});
+        self.0.values().zip(other.0.values()).fold(&mut result, |acc, (left, right)| {*acc &=  left == right; acc});
         result
     }
 }
@@ -26,7 +22,7 @@ impl std::cmp::Eq for State {
 
 }
 pub struct Planner<'a> {
-    domain: &'a Domain<'a>,
+    domain: &'a Domain,
     state: State,
     blackboard: HashMap<String, i32>,
     plan: Vec<String>
@@ -42,100 +38,53 @@ enum ExpressionResult {
 
 impl Planner<'_>{
 
-    fn run_call(&mut self, expr:&Expr) -> Result<(), ParserError> {
-        // if self.plan.len() > 32 {
-        //     Ok(())
-        // } else {
-            if let Expr::Call(func, _, args) = expr {
-                if args.len() == 0 {
-                    if self.domain.tasks.contains_key(func) {
-                        // println!("Calling task {}", func);
-                        self.run_task(func)?
-                    } else {
-                        // println!("Calling operator {}()", func);
-                        self.plan.push(func.clone());
-                    }
-                } else {
-                    // println!("Calling operator {}(args)", func);
-                    // let arglist = args.fold(String::new(), |mut acc, item| {acc += &format!("{}", item); acc});
-                    self.plan.push(format!("{}({})", func, args.iter().fold(String::new(), |mut acc, item| {acc += &format!("{}, ", item); acc})));
-                }
-                Ok(())
-            } else {
-                Err(expr.to_err(String::from("Attempted to call an unexpected expression")))
-            }
-        // }
-    }
 
-    fn run_exprs(&mut self, exprs:&Vec<Expr>, can_call:bool) -> Result<(), ParserError> {
-        for expr in exprs {
-            match expr {
-                Expr::Assignment(var, e, _) => {
-                    if let Expr::Call(_,_,_) = e.as_ref() {
-                        self.run_call(e)?;
-                        self.plan.push(format!("Store previous result as {}", var));
-                    } else {
-                        self.state.s.insert(var.clone(), e.eval(&self.state.s)?);
-                    }
-                    Ok(())
-                },
-                Expr::Call(_, _, _) => if can_call { self.run_call(expr)} else { Err(expr.to_err(String::from("Unexpected call expression."))) },
-                _ => Err(expr.to_err(String::from("Unexpected expression in the task definition.")))
-            }?
-        }
-        Ok(())
-    }
  
 
-    fn run_task(&mut self, task_name: &str) -> Result<(), ParserError> {
-        let task = self.domain.tasks.get(task_name).expect(format!("Unknown task name {}", task_name).as_str());
-        if if let Some(ref preconditions) = task.preconditions {
-            // println!("Checking task's {} preconditions {:?}", task_name, preconditions);
-            preconditions.eval(&self.state.s)? == 1    
-        } else {
-            true
-        } {
-            println!("Running task {}", task_name);
-            match &task.body {
-                super::domain::TaskStatement::Composite(ref methods) => {
-                    let mut is_run_method = false;
-                    for method in methods {
-                        if if let Some(ref preconditions) = method.preconditions {
-                            let r = preconditions.eval(&self.state.s)?;
-                            r == 1
+    fn run_task(&mut self, task: &Stmt) -> Result<(), ParserError> {
+        if task.are_preconditions_satisfied(&self.state.0)? == 1 {
+            println!("Running task {}", task.name()?);
+            if task.is_composite()? {
+                let mut is_method_run = false;
+                task.for_each_method_while(&mut |method| if method.are_preconditions_satisfied(&self.state.0).unwrap() == 1 {
+                    self.run_task(method);
+                    is_method_run = true;
+                    false } else { true
+                });
+                if !is_method_run { // no methods are statically satisfied
+                    let mut path = Vec::new();
+                    task.for_each_method_while(&mut |method| { // figure out which method can be reached through search
+                        if let Some(plan) = Astar(self.state.clone(), method, |f| 4, self.domain) {
+                            path = plan;
+                            false
                         } else {
                             true
-                        } {
-                            println!("Running method {}.{}", task_name, method.name);
-                            is_run_method = true;
-                            self.run_exprs(&method.body, true)?;
-                            break
                         }
+                    });
+                    if path.len() > 0 {
+                        println!("Path: {:?}", path);
+                        todo!("Run path")
                     }
-                    if !is_run_method {
-                        // println!("No methods can run when state is {:?}", self.state);
-                        for method in methods {
-                            let start = State{s:self.state.s.clone(), last_task_name:method.name.clone()};
-                            if let Some(plan) = Astar(start, method, |f| 4, self.domain) {
-                                println!("We can achieve {}.{} through {:?}", task_name, method.name, plan);
-                                is_run_method = true;
-                                plan.iter().try_for_each(|task| self.run_task(task))?;
-                                break
-                            }
-                        }
+                }
+                if !is_method_run {
+                    panic!("No solutions found to reach {} methods", task.name()?);
+                }
+                println!("Done running composite task {}", task.name()?);
+            } else {
+                task.for_each_operator(&mut |op| {
+                    if let Some(target) = op.get_assignment_target() {
+                        println!("Storing next call to blackboard as {}", target);
                     }
-                    if is_run_method && task.effects.len() > 0{
-                        self.run_exprs(&task.effects, false)?;
+                    let target = op.get_call_target().expect("Only call expressions are supported in task/method bodies.");
+                    if let Some(task) = self.domain.tasks.get(&target) {
+                        self.run_task(task);
+                    } else {
+                        println!("Calling operator {}", target);
                     }
-                    if !is_run_method {
-                        panic!("Unable to find any solutions to run {}", task_name);
-                    }
-                },
-                super::domain::TaskStatement::Primitive(body) => { self.run_exprs(body, true)?},
+                });
+                println!("Done running primitive task {}", task.name()?);
             }
-            self.run_exprs(&task.effects, false)?
-        } else {
-            panic!("Task {} preconditions are unmet!", task_name);
+            task.effect(&mut self.state);
         }
         Ok(())
     }
@@ -143,13 +92,16 @@ impl Planner<'_>{
     //     self.run_stmt(self.ast.get(self.main_id).unwrap())
     // }
     pub fn run<'a>(domain: &'a Domain) -> Result<Vec<String>, ParserError> {
-        let mut state = State{s:HashMap::new(), last_task_name:String::from("start")};
-        for var in &domain.world_variables {
-            state.s.insert(var.clone(), 0);
+        let mut state = State(HashMap::new());
+        for task in domain.tasks.values() {
+            for var in task.affects().iter().chain(task.depends().iter()) {
+                state.0.insert(var.clone(), 0);
+            }
+
         }
-        state.s.insert(String::from("WsCanSeeEnemy"), 1);
+        state.0.insert(Rc::new(String::from("WsCanSeeEnemy")), 1);
         let mut planner = Planner{domain, state, blackboard:HashMap::new(), plan:Vec::new()};
-        planner.run_task("Main")?;
+        planner.run_task(domain.tasks.get(&domain.main).expect("Unable to find Main task"));
         Ok(planner.plan)
     }
 }

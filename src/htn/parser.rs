@@ -1,5 +1,7 @@
 use std::{fmt::{self, Write}, rc::Rc, convert::TryInto, collections::{HashMap, btree_map::Values, HashSet}, ops::Deref};
 
+use super::planner::State;
+
 pub struct ParserError {
     line: usize,
     col: usize,
@@ -374,19 +376,19 @@ impl Expr {
         vars
     }
 
-    pub fn get_assignment_target(&self) -> Option<&str> {
+    pub fn get_assignment_target(&self) -> Option<Rc<String>> {
         if let Self::Assignment(target, _,_) = self {
-            Some(target.as_str())
+            Some(target.clone())
         } else {
             None
         }
     }
 
-    pub fn get_call_target(&self) -> Option<&str> {
-        if let Self::Call(target, _,_) = self {
-            Some(target.as_str())
-        } else {
-            None
+    pub fn get_call_target(&self) -> Option<Rc<String>> {
+        match self {
+            Self::Call(target, _,_) => Some(target.clone()),
+            Self::Assignment(_,left,_) => left.get_call_target(),
+            _ => None,
         }
     }
 
@@ -435,8 +437,10 @@ impl std::fmt::Display for StmtFormatter<'_> {
         match self.stmt {
             Stmt::Method{ name, preconditions:Some(preconditions), body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}):{}", self.stmt.line_no(), ' ', token, name, preconditions, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
             Stmt::Method{ name, preconditions:None, body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}:{}", self.stmt.line_no(), ' ', token, name, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
-            Stmt::Task{ name, preconditions:Some(preconditions), body, effects, token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}):{}", self.stmt.line_no(), ' ',token, name, preconditions, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
-            Stmt::Task{ name, preconditions:None, body, effects, token } => write!(f, "{:>lc$}: {:>depth$}{} {}:{}", self.stmt.line_no(), ' ',token, name, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Task{ name, preconditions:Some(preconditions), body, effects:None, token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}):{}", self.stmt.line_no(), ' ',token, name, preconditions, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Task{ name, preconditions:None, body, effects:None, token } => write!(f, "{:>lc$}: {:>depth$}{} {}:{}", self.stmt.line_no(), ' ',token, name, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Task{ name, preconditions:Some(preconditions), body, effects:Some(effects), token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}):{}{:>lc$}: {:>depth$}EFFECTS:{}", self.stmt.line_no(), ' ',token, name, preconditions, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, effects.line_no(), ' ', StmtFormatter{depth:new_depth, stmt:effects, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Task{ name, preconditions:None, body, effects:Some(effects), token } => write!(f, "{:>lc$}: {:>depth$}{} {}:{}{:>lc$}: {:>depth$}EFFECTS:{}", self.stmt.line_no(), ' ',token, name, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, effects.line_no(), ' ', StmtFormatter{depth:new_depth, stmt:effects, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
             Stmt::Block(blk) => {
                 
                 write!(f, "\n")?;
@@ -497,15 +501,44 @@ impl Stmt {
         result
     }
 
-    pub fn for_each_method<'a, F>(&'a self, mut func:F) where F: FnMut(&'a Self) {
+    pub fn is_composite(&self) -> Result<bool, ParserError> {
+        match self {
+            Self::Task{body,..} |
+            Self::Method{body,..} => body.is_composite(),
+            Self::Block(blk) => Ok(blk.iter().all(|stmt| match stmt {
+                Self::Method{..} => true,
+                _ => false,
+            })),
+            _ => Err(self.to_err(String::from("Unable to decide composite/primitive")))
+        }
+    }
+
+    pub fn for_each_method<'a, F>(&'a self, func:&mut F) where F: FnMut(&'a Self) {
         match self {
             Self::Task{body,..} => body.for_each_method(func),
-            Self::Block(blk) => for stmt in blk { func(stmt) },
+            Self::Block(blk) => for stmt in blk { stmt.for_each_method(func) },
             Self::Method{..} => func(self),
             _ => (),
         }
     }
 
+    pub fn for_each_operator<'a, F>(&'a self, func:&mut F) where F: FnMut(&'a Expr) {
+        match self {
+            Self::Task{body,..} |
+            Self::Method{body,..} => body.for_each_operator(func),
+            Self::Block(blk) => for stmt in blk { stmt.for_each_operator(func) },
+            Self::Expression(e) => func(e)
+        }
+    }
+
+    pub fn for_each_method_while<'a, F>(&'a self, func:&mut F) -> bool where F: FnMut(&'a Self) -> bool {
+        match self {
+            Self::Task{body,..} => body.for_each_method_while(func),
+            Self::Block(blk) => {for stmt in blk { if !stmt.for_each_method_while(func) { break } }; false},
+            Self::Method{..} => func(self),
+            _ => false,
+        }
+    }
 
     pub fn preconditions(&self) -> Result<&Option<Expr>, ParserError> {
         match &self {
@@ -515,10 +548,27 @@ impl Stmt {
         }
     }
 
+    pub fn are_preconditions_satisfied(&self, state:&HashMap<Rc<String>, i32>) -> Result<i32, ParserError> {
+        match &self {
+            Self::Method{preconditions:Some(preconditions),..} |
+            Self::Task{preconditions:Some(preconditions),..} => preconditions.eval(state),
+            _ => Ok(1)
+        }
+    }
+
     pub fn effects(&self) -> Result<&Option<Box<Stmt>>, ParserError> {
         match &self {
             Self::Task{effects,..} => Ok(effects),
             _ => Err(self.to_err(String::from("Only tasks have effects")))
+        }
+    }
+
+    pub fn effect(&self, state:&mut State) -> i32 {
+        match &self {
+            Self::Task{effects:Some(effects),..} => effects.effect(state),
+            Self::Block(blk) => { for stmt in blk { stmt.effect(state); } 1},
+            Self::Expression(e) => e.eval_mut(&mut state.0).unwrap(),
+            _ => 0,
         }
     }
 }
@@ -769,7 +819,7 @@ impl Parser {
                         Ok(parent_statemet)
                     })
                 } else {
-                    Err(parent_statemet.to_err(String::from("'else' for a method without preconditions will never run.")))
+                    Ok(parent_statemet)
                 }
             }, "Expected ':' after method declaration.")
         }, "Expected method name.")
