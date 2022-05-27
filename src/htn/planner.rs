@@ -1,5 +1,7 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, cmp::Reverse};
 
+
+use priority_queue::PriorityQueue;
 
 use super::{domain::Domain, search::{Astar, StateAndPath}, parser::{Stmt, Expr, ParserError}};
 
@@ -25,53 +27,54 @@ pub struct Planner<'a> {
     domain: &'a Domain,
     state: State,
     last_successfull_task:Rc<String>,
-    blackboard: HashMap<String, i32>,
+    method_heatmap:HashMap<Rc<String>, i32>,
     plan: Vec<String>
 }
 
-#[derive(Debug)]
-enum ExpressionResult {
-    Literal(i32), 
-    Task(String),
-    Variable(String),
-    FunctionCall(String)
-}
 
 impl Planner<'_>{
 
-
+    fn plan_to_run_task(&mut self, task:&Stmt) -> Result<bool, ParserError> {
+        let start = StateAndPath{state:self.state.clone(), method_name:self.last_successfull_task.clone()};
+        if let Some(plan) = Astar(start, task, |f| 4, self.domain) {
+            if plan.len() > 0 {
+                for subtask in plan {
+                    if !self.run_task(self.domain.tasks.get(&subtask).unwrap())? {
+                        panic!("Planner thought task is achievable but it's not");
+                    }
+                }
+                self.run_task(task)
+            } else {
+                Ok(false)
+            }
+        } else {
+            Ok(false)
+        }
+    }
  
 
     fn run_task(&mut self, task: &Stmt) -> Result<bool, ParserError> {
+        if self.plan.len() > 20 && task.name()? == self.domain.main {
+            return Ok(true)
+        }
         if task.are_preconditions_satisfied(&self.state.0)? == 1 {
             if let Stmt::Task{name,..} = task {
                 self.last_successfull_task = name.clone();
             }
             // println!("Running task {}", task.name()?);
             if task.is_composite()? {
-                let mut is_method_run = false;
-                task.for_each_method_while(&mut |method| if self.run_task(method).unwrap() { is_method_run = true; false } else { true });
-                if !is_method_run { // no methods are statically satisfied
-                    task.for_each_method_while(&mut |method| { // figure out which method can be reached through search
-                        let start = StateAndPath{state:self.state.clone(), method_name:self.last_successfull_task.clone()};
-                        if let Some(plan) = Astar(start, method, |f| 4, self.domain) {
-                            if plan.len() > 0 {
-                                is_method_run = true;
-                                for subtask in plan {
-                                    if !self.run_task(self.domain.tasks.get(&subtask).unwrap()).unwrap() {
-                                        panic!("Planner thought task is achievable but it's not");
-                                    }
-                                }
-                                self.run_task(method);
-                                false 
-                            } else { true }
-                        } else {
-                            true
-                        }
-                    });
-                }
-                if !is_method_run {
-                    panic!("No solutions found to reach {} methods", task.name()?);
+                let mut queue = PriorityQueue::new();
+                task.for_each_method(&mut |method| {
+                    if method.are_preconditions_satisfied(&self.state.0).unwrap() == 1 {
+                        queue.push(method.name().unwrap().clone(), Reverse(self.method_heatmap.get(&method.name().unwrap()).or(Some(&0)).unwrap()));
+                    }
+                });
+                if queue.len() == 0 { // no methods are statically satisfied
+                    task.for_each_method_while(&mut |method| !self.plan_to_run_task(method).unwrap());
+                } else {
+                    if let Some((method_name, _)) = queue.pop() {
+                        task.for_each_method_while(&mut |method| if method.name().unwrap() == method_name { self.method_heatmap.insert(method_name.clone(), self.method_heatmap.get(&method_name).or(Some(&0)).unwrap()+1);!self.run_task(method).unwrap()} else { true });
+                    }
                 }
                 // println!("Done running composite task {}", task.name()?);
             } else {
@@ -79,21 +82,14 @@ impl Planner<'_>{
                     let target = op.get_call_target().expect("Only call expressions are supported in task/method bodies.");
                     if let Some(task) = self.domain.tasks.get(&target) {
                         if !self.run_task(task).unwrap() {
-                            let start = StateAndPath{state:self.state.clone(), method_name:self.last_successfull_task.clone()};
-                            if let Some(plan) = Astar(start, task, |f| 4, self.domain) {
-                                if plan.len() > 0 {
-                                    for subtask in plan {
-                                        if !self.run_task(self.domain.tasks.get(&subtask).unwrap()).unwrap() {
-                                            panic!("Planner thought task is achievable but it's not");
-                                        }
-                                    }
-                                }
+                            if !self.plan_to_run_task(task).unwrap() {
+                                panic!("No solutions found to run {} task", task.name().unwrap());
                             }
-                            self.run_task(task);
                         }
                     } else {
                         let op_type = if op.get_assignment_target().is_some() { "blackboard"} else { "simple" };
-                        println!("Calling {} operator {}", op_type, op);
+                        // println!("Calling {} operator {}", op_type, op);
+                        self.plan.push(format!("{}", op));
                     }
                 });
                 // println!("Done running primitive task {}", task.name()?);
@@ -115,8 +111,8 @@ impl Planner<'_>{
             }
 
         }
-        state.0.insert(Rc::new(String::from("WsCanSeeEnemy")), 1);
-        let mut planner = Planner{domain, state, blackboard:HashMap::new(), plan:Vec::new(), last_successfull_task:domain.main.clone()};
+        // state.0.insert(Rc::new(String::from("WsCanSeeEnemy")), 1);
+        let mut planner = Planner{domain, state, plan:Vec::new(), method_heatmap:HashMap::new(), last_successfull_task:domain.main.clone()};
         planner.run_task(domain.tasks.get(&domain.main).expect("Unable to find Main task"));
         Ok(planner.plan)
     }
