@@ -42,7 +42,7 @@ impl Planner<'_>{
 
  
 
-    fn run_task(&mut self, task: &Stmt) -> Result<(), ParserError> {
+    fn run_task(&mut self, task: &Stmt) -> Result<bool, ParserError> {
         if task.are_preconditions_satisfied(&self.state.0)? == 1 {
             if let Stmt::Task{name,..} = task {
                 self.last_successfull_task = name.clone();
@@ -50,11 +50,7 @@ impl Planner<'_>{
             // println!("Running task {}", task.name()?);
             if task.is_composite()? {
                 let mut is_method_run = false;
-                task.for_each_method_while(&mut |method| if method.are_preconditions_satisfied(&self.state.0).unwrap() == 1 {
-                    self.run_task(method);
-                    is_method_run = true;
-                    false } else { true
-                });
+                task.for_each_method_while(&mut |method| if self.run_task(method).unwrap() { is_method_run = true; false } else { true });
                 if !is_method_run { // no methods are statically satisfied
                     task.for_each_method_while(&mut |method| { // figure out which method can be reached through search
                         let start = StateAndPath{state:self.state.clone(), method_name:self.last_successfull_task.clone()};
@@ -62,17 +58,17 @@ impl Planner<'_>{
                             if plan.len() > 0 {
                                 is_method_run = true;
                                 for subtask in plan {
-                                    self.run_task(self.domain.tasks.get(&subtask).unwrap());
+                                    if !self.run_task(self.domain.tasks.get(&subtask).unwrap()).unwrap() {
+                                        panic!("Planner thought task is achievable but it's not");
+                                    }
                                 }
                                 self.run_task(method);
-                                false
+                                false 
                             } else { true }
-                            
                         } else {
                             true
                         }
                     });
-                    
                 }
                 if !is_method_run {
                     panic!("No solutions found to reach {} methods", task.name()?);
@@ -80,21 +76,33 @@ impl Planner<'_>{
                 // println!("Done running composite task {}", task.name()?);
             } else {
                 task.for_each_operator(&mut |op| {
-                    if let Some(target) = op.get_assignment_target() {
-                        println!("Storing next call to blackboard as {}", target);
-                    }
                     let target = op.get_call_target().expect("Only call expressions are supported in task/method bodies.");
                     if let Some(task) = self.domain.tasks.get(&target) {
-                        self.run_task(task);
+                        if !self.run_task(task).unwrap() {
+                            let start = StateAndPath{state:self.state.clone(), method_name:self.last_successfull_task.clone()};
+                            if let Some(plan) = Astar(start, task, |f| 4, self.domain) {
+                                if plan.len() > 0 {
+                                    for subtask in plan {
+                                        if !self.run_task(self.domain.tasks.get(&subtask).unwrap()).unwrap() {
+                                            panic!("Planner thought task is achievable but it's not");
+                                        }
+                                    }
+                                }
+                            }
+                            self.run_task(task);
+                        }
                     } else {
-                        println!("Calling operator {}", op);
+                        let op_type = if op.get_assignment_target().is_some() { "blackboard"} else { "simple" };
+                        println!("Calling {} operator {}", op_type, op);
                     }
                 });
                 // println!("Done running primitive task {}", task.name()?);
             }
             task.effect(&mut self.state);
+            Ok(true)
+        } else {
+            Ok(false)
         }
-        Ok(())
     }
     // fn run_main(&mut self) {
     //     self.run_stmt(self.ast.get(self.main_id).unwrap())
