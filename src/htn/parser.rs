@@ -417,7 +417,7 @@ impl Expr {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Stmt {
     Method{name:Rc<String>, preconditions:Option<Expr>, body:Box<Stmt>, token:Token}, // Name, condition, subtasks
     Task{name:Rc<String>, preconditions:Option<Expr>, body:Box<Stmt>, effects:Option<Box<Stmt>>, token:Token}, // Name, condition, methods, effects
@@ -449,6 +449,14 @@ impl std::fmt::Display for StmtFormatter<'_> {
             },
             Stmt::Expression(e) => write!(f, "{:>lc$}: {:>depth$}{}\n", self.stmt.line_no(), ' ', e, depth=self.depth, lc=self.max_line_count),
         }
+    }
+}
+
+impl std::fmt::Debug for StmtFormatter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)?;
+        writeln!(f, "Effects: {:?}", self.stmt.affects())?;
+        writeln!(f, "Depends {:?}", self.stmt.depends())
     }
 }
 

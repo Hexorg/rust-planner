@@ -6,7 +6,7 @@ fn main() {
     println!("Starting...");
     let domain = Domain::from_file("htn-problems/testing.htn").expect("Domain construction error");
     // println!("-->{:>depth$}{}<--", "hello", depth=5);
-    println!("{}", domain);
+    println!("{:?}", domain);
     let plan = Planner::run(&domain).unwrap();
     for action in plan {
         println!("{}", action);

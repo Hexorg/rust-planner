@@ -54,7 +54,7 @@ impl Planner<'_>{
  
 
     fn run_task(&mut self, task: &Stmt) -> Result<bool, ParserError> {
-        if self.plan.len() > 20 && task.name()? == self.domain.main {
+        if self.plan.len() > 40 && task.name()? == self.domain.main {
             return Ok(true)
         }
         if task.are_preconditions_satisfied(&self.state.0)? == 1 {
@@ -65,8 +65,14 @@ impl Planner<'_>{
             if task.is_composite()? {
                 let mut queue = PriorityQueue::new();
                 task.for_each_method(&mut |method| {
+                    let method_name = method.name().unwrap();
                     if method.are_preconditions_satisfied(&self.state.0).unwrap() == 1 {
-                        queue.push(method.name().unwrap().clone(), Reverse(self.method_heatmap.get(&method.name().unwrap()).or(Some(&0)).unwrap()));
+                        queue.push(
+                            method_name.clone(), 
+                            Reverse(*self.method_heatmap.get(&method_name).or(Some(&0)).unwrap())
+                        );
+                    } else {
+                        self.method_heatmap.insert(method.name().unwrap().clone(), -10);
                     }
                 });
                 if queue.len() == 0 { // no methods are statically satisfied
@@ -87,7 +93,7 @@ impl Planner<'_>{
                             }
                         }
                     } else {
-                        let op_type = if op.get_assignment_target().is_some() { "blackboard"} else { "simple" };
+                        // let op_type = if op.get_assignment_target().is_some() { "blackboard"} else { "simple" };
                         // println!("Calling {} operator {}", op_type, op);
                         self.plan.push(format!("{}", op));
                     }

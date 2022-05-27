@@ -33,6 +33,8 @@ effects:
 
 task LookForEnemy(atBridge):
     lookForEnemy()
+effects:
+    WsCanSeeEnemy = true
 
 
 task NavigateToBridge(targetIsBridge == true):

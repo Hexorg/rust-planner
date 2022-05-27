@@ -1,8 +1,6 @@
 use std::{fs, fmt::Debug,  collections::HashMap, rc::Rc, ops::Deref};
 use super::parser::{Parser, Stmt, ParserError, StmtFormatter};
 
-#[derive(Debug)]
-
 pub struct Domain {
     pub tasks: HashMap<Rc<String>, Stmt>,
     pub neighbors: HashMap<Rc<String>, Vec<Rc<String>>>,
@@ -34,6 +32,32 @@ impl std::fmt::Display for Domain {
             max_line_count += 1;
         }
         sorted.iter().try_for_each(|stmt| write!(f, "{}", StmtFormatter{depth:0, max_line_count, stmt}))
+    }
+}
+
+impl std::fmt::Debug for Domain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Domain({}):\n", self.filepath)?;
+    
+        let mut sorted = self.tasks.values().collect::<Vec<&Stmt>>();
+        let mut largest_line = 0;
+        sorted.sort_by(|a, b| {
+            let a_line = a.line_no();
+            let b_line = b.line_no();
+            let r = a_line.cmp(&b_line); 
+            largest_line = match r {
+                std::cmp::Ordering::Less => b_line,
+                std::cmp::Ordering::Equal |
+                std::cmp::Ordering::Greater => a_line,
+            };
+            r
+        });
+        let mut max_line_count = 0;
+        while largest_line > 0 {
+            largest_line /= 10;
+            max_line_count += 1;
+        }
+        sorted.iter().try_for_each(|stmt| write!(f, "{:?}", StmtFormatter{depth:0, max_line_count, stmt}))
     }
 }
 
