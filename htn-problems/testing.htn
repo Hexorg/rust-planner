@@ -17,11 +17,17 @@ task AttackEnemy:
 #        UprootTrunk()
 
 
-task DoTrunkSlam:
+task DoTrunkSlam(WsTrunkHealth > 0):
     DoTrunkSlamOperator()
 effects:
     WsTrunkHealth -= 1
 
+task ChooseBridgeToCheck:
+    target = chooseBridge()
+effects:
+    targetIsBridge = true 
+
+task NavigateToBridge
 
 task FindTrunk:
     trunk = FindTrunkOperator() # Operator results can be stored in blackboard

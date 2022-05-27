@@ -709,9 +709,9 @@ impl Parser {
             | TokenData::DIVIDE_BY
             | TokenData::MULTIPLY_BY), {
                 if let Expr::Variable(varname, _) = &target {
-                    let line = self.tokens[self.idx].line;
-                    let col = self.tokens[self.idx].col;
-                    let value_expr = match self.tokens[self.idx].t {
+                    let line = self.tokens[self.idx-1].line;
+                    let col = self.tokens[self.idx-1].col;
+                    let value_expr = match self.tokens[self.idx-1].t {
                         // TokenData::EQUALS => self.expression()?,
                         TokenData::ADD_TO => Expr::Binary(Box::new(Expr::Variable(varname.clone(), self.tokens[self.idx].clone())), Token{line, col, len:0, t:TokenData::PLUS}, Box::new(self.expression()?)),
                         TokenData::SUBTRACT_FROM => Expr::Binary(Box::new(Expr::Variable(varname.clone(), self.tokens[self.idx].clone())), Token{line, col, len:0, t:TokenData::MINUS}, Box::new(self.expression()?)),
