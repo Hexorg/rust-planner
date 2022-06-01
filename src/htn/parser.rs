@@ -2,18 +2,18 @@ use std::{fmt::{self, Write}, rc::Rc, convert::TryInto, collections::{HashMap, b
 
 use super::planner::State;
 
-pub struct ParserError {
+pub struct Error {
     line: usize,
     col: usize,
     message: String
 }
 
-impl fmt::Display for ParserError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "line:{} col:{} {}", self.line, self.col, self.message)
     }
 }
-impl fmt::Debug for ParserError {
+impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "line:{} col:{} {}", self.line, self.col, self.message)
     }
@@ -122,7 +122,7 @@ pub struct Parser {
 }
 
 impl Lexer {
-    pub fn tokenize(htn_source: &str) -> Result<Vec<Token>, ParserError> {
+    pub fn tokenize(htn_source: &str) -> Result<Vec<Token>, Error> {
         let mut line = 1; // current source line, used for error reporting by Tokens
         let mut col = 1; // current source column, used for error reporting by Tokens
         let mut last_block_tab_depth = 0; // needed to insert BLOCK_END tokens properly
@@ -169,13 +169,13 @@ impl Lexer {
                             tab_depth = 1;
                         } else if let Some(DepthSeparator::SPACES(sc)) = depth_separator { // we already know that we're using spaces and how many
                             if tab_depth % sc != 0 {
-                                return Err(ParserError{line, col, message:String::from("Unexpected amount of spaces.")});
+                                return Err(Error{line, col, message:String::from("Unexpected amount of spaces.")});
                             }
                             tab_depth = tab_depth / sc;
                         } // else we're using tabs and '\t' => branch of this match counts tab_depth properly
                         if tab_depth > last_block_tab_depth { // new block start
                             if let Some(Token{t:TokenData::BLOCK_END,..}) = r.last() {
-                                return Err(ParserError{line, col, message:String::from("Unexpected block identation.")});
+                                return Err(Error{line, col, message:String::from("Unexpected block identation.")});
                             }
                             r.push(Token{line, col:1, len:0, t:TokenData::BLOCK_START});
                             last_block_tab_depth = tab_depth;
@@ -244,7 +244,7 @@ impl Lexer {
                 '\t' if is_newline => { if depth_separator.is_none() { // if we don't know if we're using tabs or spaces
                         depth_separator = Some(DepthSeparator::TABS);
                     } else if let Some(DepthSeparator::SPACES(_)) = depth_separator {
-                        return Err(ParserError{line, col, message:String::from("Tabs and spaces can't be used together")})
+                        return Err(Error{line, col, message:String::from("Tabs and spaces can't be used together")})
                     }
                     tab_depth += 1;
                 },
@@ -252,7 +252,7 @@ impl Lexer {
                         if depth_separator.is_none() {
                             depth_separator = Some(DepthSeparator::SPACES(0));
                         } else if let Some(DepthSeparator::TABS) = depth_separator {
-                            return Err(ParserError{line, col, message:String::from("Tabs and spaces can't be used together")})
+                            return Err(Error{line, col, message:String::from("Tabs and spaces can't be used together")})
                         }
                         tab_depth += 1; // tab_depth counts amount of spaces seen first. Then on the first non-whitespace character we convert amount of spaces to actual tab-depth
                 },
@@ -318,7 +318,7 @@ impl std::fmt::Display for Expr {
 }
 
 impl Expr {
-    pub fn eval(&self, state:&HashMap<Rc<String>, i32>) -> Result<i32, ParserError> {
+    pub fn eval(&self, state:&HashMap<Rc<String>, i32>) -> Result<i32, Error> {
         use TokenData::*;
         match self {
             Self::Binary(left, op, right) => {
@@ -337,7 +337,7 @@ impl Expr {
                     NOT_EQUALS => Ok((left != right) as i32),
                     OR => Ok(left | right),
                     AND => Ok(left & right),
-                    _ => Err(ParserError{line:op.line, col:op.col, message:String::from("Unsupported operation.")}),
+                    _ => Err(Error{line:op.line, col:op.col, message:String::from("Unsupported operation.")}),
                 }
             },
             Self::Grouping(g, _) => Ok(g.eval(state)?),
@@ -345,17 +345,17 @@ impl Expr {
             Self::Variable(var, tok) => if let Some(val) = state.get(var) {
                 Ok(*val)
             } else {
-                Err(ParserError{line:tok.line, col:tok.col, message:String::from("Unknown variable name.")})
+                Err(Error{line:tok.line, col:tok.col, message:format!("Unknown variable name: {}.", var)})
             },
             Self::Unary(op, right) => if let NOT = op.t { if right.eval(state)? == 0 { Ok(1) } else { Ok(0) } } else { 
-                Err(ParserError{line:op.line, col:op.col, message:String::from("Unexpected unary operator.")})
+                Err(Error{line:op.line, col:op.col, message:String::from("Unexpected unary operator.")})
             },
-            Expr::Call(_, tok, _) | Expr::Assignment(_,_,tok) => Err(ParserError{line:tok.line, col:tok.col, message:String::from("Unable to evaluate this expression.")}),
+            Expr::Call(_, tok, _) | Expr::Assignment(_,_,tok) => Err(Error{line:tok.line, col:tok.col, message:String::from("Unable to evaluate this expression.")}),
             
         }
     }
 
-    pub fn eval_mut(&self, state:&mut HashMap<Rc<String>, i32>) -> Result<i32, ParserError> {
+    pub fn eval_mut(&self, state:&mut HashMap<Rc<String>, i32>) -> Result<i32, Error> {
         match self {
             Self::Assignment(var, right, _) => {let r = right.eval(state)?; state.insert(var.clone(), r); Ok(r)},
             _ => self.eval(state)
@@ -392,7 +392,7 @@ impl Expr {
         }
     }
 
-    pub fn to_err(&self, msg:String) -> ParserError {
+    pub fn to_err(&self, msg:String) -> Error {
         match self {
             Expr::Binary(_, tok, _) |
             Expr::Grouping(_, tok) |
@@ -400,7 +400,7 @@ impl Expr {
             Expr::Variable(_, tok) |
             Expr::Unary(tok, _) |
             Expr::Assignment(_, _, tok) |
-            Expr::Call(_, tok, _) => ParserError{line:tok.line, col:tok.col, message:msg}
+            Expr::Call(_, tok, _) => Error{line:tok.line, col:tok.col, message:msg}
         }
     }
 
@@ -462,10 +462,10 @@ impl std::fmt::Debug for StmtFormatter<'_> {
 
 
 impl Stmt {
-    pub fn to_err(&self, msg:String) -> ParserError {
+    pub fn to_err(&self, msg:String) -> Error {
         match self {
             Stmt::Method{token,..} |
-            Stmt::Task{token,..} => ParserError{line:token.line, col:token.col, message:msg},
+            Stmt::Task{token,..} => Error{line:token.line, col:token.col, message:msg},
             Stmt::Block(blk) => blk.first().expect("Unable to generate error for empty block.").to_err(msg),
             Stmt::Expression(e) => e.to_err(msg),
         }
@@ -479,7 +479,7 @@ impl Stmt {
             Stmt::Expression(e) => e.line_no()
         }
     }
-    pub fn name(&self) -> Result<Rc<String>, ParserError> {
+    pub fn name(&self) -> Result<Rc<String>, Error> {
         match self {
             Self::Method{name, ..} |
             Self::Task{name, ..} => Ok(name.clone()),
@@ -509,7 +509,7 @@ impl Stmt {
         result
     }
 
-    pub fn is_composite(&self) -> Result<bool, ParserError> {
+    pub fn is_composite(&self) -> Result<bool, Error> {
         match self {
             Self::Task{body,..} |
             Self::Method{body,..} => body.is_composite(),
@@ -521,34 +521,34 @@ impl Stmt {
         }
     }
 
-    pub fn for_each_method<'a, F>(&'a self, func:&mut F) where F: FnMut(&'a Self) {
+    pub fn for_each_method<'a, F>(&'a self, func:&mut F) -> Result<(), Error> where F: FnMut(&'a Self) -> Result<(), Error> {
         match self {
             Self::Task{body,..} => body.for_each_method(func),
-            Self::Block(blk) => for stmt in blk { stmt.for_each_method(func) },
+            Self::Block(blk) => {for stmt in blk { stmt.for_each_method(func)? } Ok(())},
             Self::Method{..} => func(self),
-            _ => (),
+            _ => Ok(()),
         }
     }
 
-    pub fn for_each_operator<'a, F>(&'a self, func:&mut F) where F: FnMut(&'a Expr) {
+    pub fn for_each_operator<'a, F>(&'a self, func:&mut F) -> Result<(), Error> where F: FnMut(&'a Expr) -> Result<(), Error> {
         match self {
             Self::Task{body,..} |
             Self::Method{body,..} => body.for_each_operator(func),
-            Self::Block(blk) => for stmt in blk { stmt.for_each_operator(func) },
+            Self::Block(blk) => {for stmt in blk { stmt.for_each_operator(func)? } Ok(())},
             Self::Expression(e) => func(e)
         }
     }
 
-    pub fn for_each_method_while<'a, F>(&'a self, func:&mut F) -> bool where F: FnMut(&'a Self) -> bool {
+    pub fn for_each_method_while<'a, F>(&'a self, func:&mut F) -> Result<bool, Error> where F: FnMut(&'a Self) -> Result<bool, Error> {
         match self {
             Self::Task{body,..} => body.for_each_method_while(func),
-            Self::Block(blk) => {for stmt in blk { if !stmt.for_each_method_while(func) { break } }; false},
+            Self::Block(blk) => {for stmt in blk { if !stmt.for_each_method_while(func)? { break } }; Ok(false)},
             Self::Method{..} => func(self),
-            _ => false,
+            _ => Ok(false),
         }
     }
 
-    pub fn preconditions(&self) -> Result<&Option<Expr>, ParserError> {
+    pub fn preconditions(&self) -> Result<&Option<Expr>, Error> {
         match &self {
             Self::Method{preconditions, ..} |
             Self::Task{preconditions, ..} => Ok(preconditions),
@@ -556,7 +556,7 @@ impl Stmt {
         }
     }
 
-    pub fn are_preconditions_satisfied(&self, state:&HashMap<Rc<String>, i32>) -> Result<i32, ParserError> {
+    pub fn are_preconditions_satisfied(&self, state:&HashMap<Rc<String>, i32>) -> Result<i32, Error> {
         match &self {
             Self::Method{preconditions:Some(preconditions),..} |
             Self::Task{preconditions:Some(preconditions),..} => preconditions.eval(state),
@@ -564,7 +564,7 @@ impl Stmt {
         }
     }
 
-    pub fn effects(&self) -> Result<&Option<Box<Stmt>>, ParserError> {
+    pub fn effects(&self) -> Result<&Option<Box<Stmt>>, Error> {
         match &self {
             Self::Task{effects,..} => Ok(effects),
             _ => Err(self.to_err(String::from("Only tasks have effects")))
@@ -585,7 +585,7 @@ macro_rules! perror {
     ($s:expr, $o:literal, $e:literal) => { 
         {let line = $s.tokens[$s.idx-$o].line;
         let col = $s.tokens[$s.idx-$o].col;
-        Err(ParserError{line, col, message:String::from($e)})}
+        Err(Error{line, col, message:String::from($e)})}
     }
 }
 
@@ -641,7 +641,7 @@ impl Parser {
             self.idx += 1;
         }
     }
-    fn call(&mut self) -> Result<Expr, ParserError> {
+    fn call(&mut self) -> Result<Expr, Error> {
         let expr = self.primary()?;
         ptest!(self, TokenData::OPEN_PAREN, {
             let mut args = Vec::<Expr>::new();
@@ -660,7 +660,7 @@ impl Parser {
             Ok(expr)
         })
     }
-    fn unary(&mut self) -> Result<Expr, ParserError> {
+    fn unary(&mut self) -> Result<Expr, Error> {
         ptest!(self, (TokenData::NOT | TokenData::MINUS), {
             let operator = self.tokens[self.idx-1].clone();
             let right = self.unary()?;
@@ -669,7 +669,7 @@ impl Parser {
             self.call()
         }) 
     }
-    fn factor(&mut self) -> Result<Expr, ParserError> {
+    fn factor(&mut self) -> Result<Expr, Error> {
         let mut expr = self.unary()?;
         while let TokenData::SLASH | TokenData::STAR | TokenData::AND = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
@@ -679,7 +679,7 @@ impl Parser {
         }
         Ok(expr)
     }
-    fn term(&mut self) -> Result<Expr, ParserError> {
+    fn term(&mut self) -> Result<Expr, Error> {
         let mut expr = self.factor()?;
         while let TokenData::MINUS | TokenData::PLUS | TokenData::OR = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
@@ -689,7 +689,7 @@ impl Parser {
         }
         Ok(expr)
     }
-    fn comparison(&mut self) -> Result<Expr, ParserError> {
+    fn comparison(&mut self) -> Result<Expr, Error> {
         let mut expr = self.term()?;
         while let TokenData::GREATER | TokenData::GREATER_OR_EQUALS | TokenData::SMALLER | TokenData::SMALLER_OR_EQUALS = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
@@ -699,7 +699,7 @@ impl Parser {
         }
         Ok(expr)
     }
-    fn equality(&mut self) -> Result<Expr, ParserError> {
+    fn equality(&mut self) -> Result<Expr, Error> {
         let mut expr = self.comparison()?;
         while let TokenData::NOT_EQUALS | TokenData::EQUALS_EQUALS = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
@@ -709,7 +709,7 @@ impl Parser {
         }
         Ok(expr)
     }
-    fn assignment(&mut self) -> Result<Expr, ParserError> {
+    fn assignment(&mut self) -> Result<Expr, Error> {
         let target = self.equality()?;
         ptest!(self, (TokenData::EQUALS 
             | TokenData::ADD_TO 
@@ -731,16 +731,16 @@ impl Parser {
                 } else {
                     let line = self.tokens[self.idx].line;
                     let col = self.tokens[self.idx].col;
-                    Err(ParserError{line, col, message:String::from("Invalid assignment target.")})
+                    Err(Error{line, col, message:String::from("Invalid assignment target.")})
                 }
         } else {
             Ok(target)
         })
     }
-    fn expression(&mut self) -> Result<Expr, ParserError> {
+    fn expression(&mut self) -> Result<Expr, Error> {
         self.assignment()
     }
-    fn primary(&mut self) -> Result<Expr, ParserError> {
+    fn primary(&mut self) -> Result<Expr, Error> {
         // Literal | "(" expression ")"
         if let TokenData::LITERAL(val)  = self.tokens[self.idx].t {
             self.idx += 1;
@@ -759,10 +759,10 @@ impl Parser {
         }
 
     }
-    fn effects_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn effects_statement(&mut self) -> Result<Stmt, Error> {
         pexpect_prevtoken!(self, TokenData::COLON, {self.statement()}, "Expected ':' after 'effects'.")
     }
-    fn task_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn task_statement(&mut self) -> Result<Stmt, Error> {
         let token_id = self.idx-1;
         pexpect!(self, TokenData::LABEL(name), {
             let name = Rc::new(name.clone());
@@ -780,14 +780,14 @@ impl Parser {
         }, "Expected label after 'task'.")
         
     }
-    fn expression_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn expression_statement(&mut self) -> Result<Stmt, Error> {
         let expr = self.expression()?;
         pexpect!(self, 
             (TokenData::STATEMENT_END | TokenData::BLOCK_START | TokenData::BLOCK_END), 
             {Ok(Stmt::Expression(expr))}, 
             "Expected new line after expression.")
     }
-    fn block_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn block_statement(&mut self) -> Result<Stmt, Error> {
         let mut stmts = Vec::<Stmt>::new();
         loop {
             let mut stmt = self.statement()?;
@@ -804,7 +804,7 @@ impl Parser {
         }
         
     }
-    fn method_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn method_statement(&mut self) -> Result<Stmt, Error> {
         let token_id = self.idx-1;
         pexpect!(self, TokenData::LABEL(name), {
             let name = Rc::new(name.clone());
@@ -832,7 +832,7 @@ impl Parser {
             }, "Expected ':' after method declaration.")
         }, "Expected method name.")
     }
-    fn statement(&mut self) -> Result<Stmt, ParserError> {
+    fn statement(&mut self) -> Result<Stmt, Error> {
         // println!("When Parsing a new statement, next token is {}.", self.tokens[self.idx]);
         let r = if let TokenData::TASK = self.tokens[self.idx].t {
             self.idx += 1;
@@ -846,7 +846,7 @@ impl Parser {
         } else if let TokenData::EOF = self.tokens[self.idx].t {
             let line = self.tokens[self.idx].line;
             let col = self.tokens[self.idx].col;
-            Err(ParserError{line, col, message:String::from("Reached the end of file")})
+            Err(Error{line, col, message:String::from("Reached the end of file")})
         } else {
             self.expression_statement()
         };
@@ -876,7 +876,7 @@ impl Parser {
             }
         ));
     }
-    pub fn print_parse_errors(e: &ParserError, htn_source:&str, filepath:&str) {
+    pub fn print_parse_errors(e: &Error, htn_source:&str, filepath:&str) {
         let mut lines = htn_source.lines();
         let mut last_error_line = 0;
         if let Some(eline) = lines.nth(e.line - last_error_line-1) {
@@ -888,12 +888,12 @@ impl Parser {
             eprintln!("\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos); 
         }
     }
-    pub fn parse(htn_source: &str) -> (Vec<Stmt>, Vec<ParserError>) {
+    pub fn parse(htn_source: &str) -> Result<Vec<Stmt>, Vec<Error>> {
         let mut ast = Vec::<Stmt>::new();
-        let mut errors = Vec::<ParserError>::new();
+        let mut errors = Vec::<Error>::new();
         let mut parser = match Lexer::tokenize(htn_source) {
             Ok(tokens) => Parser{idx:0, tokens},
-            Err(e) => { errors.push(e); return (ast, errors); }
+            Err(e) => { errors.push(e); return Err(errors); }
         };
         // Parser::print_tokens(&parser.tokens);
         while parser.idx + 1 < parser.tokens.len() {
@@ -902,6 +902,10 @@ impl Parser {
                 Ok(s) => ast.push(s)
             }
         }
-        (ast, errors)
+        if errors.len() > 0 {
+            Err(errors)
+        } else {
+            Ok(ast)
+        }
     }
 }

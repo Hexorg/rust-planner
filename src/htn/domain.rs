@@ -1,5 +1,6 @@
 use std::{fs, fmt::Debug,  collections::HashMap, rc::Rc, ops::Deref};
-use super::parser::{Parser, Stmt, ParserError, StmtFormatter};
+use super::parser::{Parser, Stmt, StmtFormatter};
+use super::parser;
 
 pub struct Domain {
     pub tasks: HashMap<Rc<String>, Stmt>,
@@ -7,6 +8,41 @@ pub struct Domain {
     pub main: Rc<String>,
     pub filepath: String,
     pub content: String,
+}
+
+#[derive(Debug)]
+pub enum Error {
+    IO(std::io::Error),
+    Parser(Vec<parser::Error>)
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IO(e) => write!(f, "{}", e),
+            Self::Parser(e) => {for es in e { write!(f, "{}", es)?} Ok(())}
+        }
+        
+    }
+}
+
+
+impl From<std::io::Error> for Error {
+    fn from(arg: std::io::Error) -> Self {
+        Self::IO(arg)
+    }
+}
+
+impl From<parser::Error> for Error {
+    fn from(arg: parser::Error) -> Self {
+        Self::Parser(vec![arg])
+    }
+}
+
+impl From<Vec<parser::Error>> for Error {
+    fn from(arg: Vec<parser::Error>) -> Self {
+        Self::Parser(arg)
+    }
 }
 
 impl std::fmt::Display for Domain {
@@ -71,8 +107,9 @@ impl Domain {
                     let affects = other.affects();
                     task.for_each_method(&mut |method| if affects.intersection(&method.depends()).count() > 0 {
                         println!("{} enables {}.{}", other_name, task_name, method.name().unwrap());
-                        neighbors.push(method.name().unwrap())
-                    });
+                        neighbors.push(method.name()?);
+                        Ok(())
+                    } else { Ok(())});
                     // if task effects other's preconditions
                     if affects.intersection(&task.depends()).count() > 0 {
                         neighbors.push(other_name.clone());
@@ -90,19 +127,20 @@ impl Domain {
                     }
                 }
                 result.insert(method.name().unwrap(), neighbors);
+                Ok(())
             });
         }
         result
     }
 
-    pub fn print_parse_error(&self, error: &ParserError) {
+    pub fn print_parse_error(&self, error: &parser::Error) {
         Parser::print_parse_errors(error, &self.content, &self.filepath);
     }
 
-    pub fn from_file(filepath:&str) -> Result<Domain, ParserError> {
-        let content = fs::read_to_string(filepath).expect("File error:");
-        let (ast, errors) = Parser::parse(content.as_str());
-        errors.iter().for_each(|e| Parser::print_parse_errors(e, content.as_str(), filepath));
+    pub fn from_file(filepath:&str) -> Result<Domain, Error> {
+        let content = fs::read_to_string(filepath)?;
+        let ast = Parser::parse(content.as_str())?;
+        // errors.iter().for_each(|e| Parser::print_parse_errors(e, content.as_str(), filepath));
         let mut tasks = HashMap::new();
         let mut main = None;
         for stmt in ast {
