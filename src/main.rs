@@ -20,7 +20,7 @@ fn main() {
         Err(e) => {domain.print_parse_error(&e); panic!()},
     };
     for action in plan {
-        println!("{}", action.operator);
+        print!("{:?}: {}", action, action.arguments.len());
     }
     // match plan {
     //     Ok(plan) => println!("Plan: {:?}", plan),

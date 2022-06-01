@@ -24,6 +24,7 @@ impl std::cmp::Eq for State {
 
 }
 
+#[derive(Debug)]
 pub struct PlanStep {
     pub assignment: Option<Rc<String>>,
     pub operator: Rc<String>,
@@ -38,7 +39,7 @@ impl From<&Expr> for PlanStep {
             None
         };
         let operator = expr.get_call_target().unwrap().clone();
-        let arguments = Vec::new();
+        let arguments = expr.get_call_arguments();
         Self{assignment, operator, arguments}
     }
 }

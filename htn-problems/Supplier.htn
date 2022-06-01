@@ -1,0 +1,3 @@
+task Main:
+	method Eat(hunger > 0):
+		goto(delta, restaurant)

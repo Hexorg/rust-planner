@@ -27,6 +27,7 @@ pub enum TokenData {
     EFFECTS,
     LABEL(String),
     LITERAL(i32),
+    COMMA,
     EQUALS,
     EQUALS_EQUALS,
     MINUS,
@@ -78,6 +79,7 @@ impl fmt::Display for TokenData {
             Self::EFFECTS => write!(f, "EFFECTS"),
             Self::LABEL(l) => write!(f, "{}", l),
             Self::LITERAL(l) => write!(f, "'{}'", l),
+            Self::COMMA => write!(f, ","),
             Self::EQUALS => write!(f, "="),
             Self::EQUALS_EQUALS => write!(f, "=="),
             Self::MINUS => write!(f, "-"),
@@ -85,7 +87,7 @@ impl fmt::Display for TokenData {
             Self::SLASH => write!(f, "/"),
             Self::STAR => write!(f, "*"),
             Self::GREATER => write!(f, ">"),
-            Self::SMALLER => write!(f, "<task>"),
+            Self::SMALLER => write!(f, "<"),
             Self::GREATER_OR_EQUALS => write!(f, ">="),
             Self::SMALLER_OR_EQUALS => write!(f, "<="),
             Self::NOT_EQUALS => write!(f, "!="),
@@ -153,6 +155,7 @@ impl Lexer {
                 '!' => r.push(Token{line, col, len:1, t:TokenData::NOT}),
                 '|' => r.push(Token{line, col, len:1, t:TokenData::OR}),
                 '&' => r.push(Token{line, col, len:1, t:TokenData::AND}),
+                ',' => r.push(Token{line, col, len:1, t:TokenData::COMMA}),
                 '\n' => { 
                     is_comment = false; 
                     is_newline = true;
@@ -390,6 +393,17 @@ impl Expr {
             Self::Assignment(_,left,_) => left.get_call_target(),
             _ => None,
         }
+    }
+
+    pub fn get_call_arguments(&self) -> Vec<Rc<String>> {
+        let mut result = Vec::new();    
+        println!("{}", self);
+        match self {
+            Self::Call(_,_,arg_vec) => arg_vec.iter().for_each(|e| result.extend(e.world_variables().iter().map(|v| v.clone()))),
+            Self::Assignment(_,left,_) => result.extend(left.get_call_arguments()),
+            _ => (),
+        }
+        result
     }
 
     pub fn to_err(&self, msg:String) -> Error {
@@ -654,6 +668,7 @@ impl Parser {
                     }
                 } else {
                     args.push(self.expression()?);
+                    ptest!(self, TokenData::COMMA, {} else {});
                 })
             }
         } else {
