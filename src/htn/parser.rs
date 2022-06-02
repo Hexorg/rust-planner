@@ -433,8 +433,8 @@ impl Expr {
 
 #[derive(Clone)]
 pub enum Stmt {
-    Method{name:Rc<String>, preconditions:Option<Expr>, body:Box<Stmt>, token:Token}, // Name, condition, subtasks
-    Task{name:Rc<String>, preconditions:Option<Expr>, body:Box<Stmt>, effects:Option<Box<Stmt>>, token:Token}, // Name, condition, methods, effects
+    Method{name:Rc<String>, preconditions:Option<Rc<Expr>>, body:Box<Stmt>, token:Token}, // Name, condition, subtasks
+    Task{name:Rc<String>, preconditions:Option<Rc<Expr>>, body:Box<Stmt>, effects:Option<Box<Stmt>>, token:Token}, // Name, condition, methods, effects
     Block(Vec<Stmt>),
     Expression(Expr)
 }
@@ -544,15 +544,15 @@ impl Stmt {
         }
     }
 
-    pub fn for_each_operator<'a, F>(&'a self, func:&mut F) -> Result<(), Error> where F: FnMut(&'a Expr) -> Result<(), Error> {
+    pub fn for_each_operator<'a, F>(&'a self, func:&mut F) -> Result<bool, Error> where F: FnMut(&'a Expr) -> Result<bool, Error> {
         match self {
             Self::Task{body,..} |
             Self::Method{body,..} => body.for_each_operator(func),
-            Self::Block(blk) => {for stmt in blk { stmt.for_each_operator(func)? } Ok(())},
+            Self::Block(blk) => {let mut acc = true; for stmt in blk { acc &= stmt.for_each_operator(func)? } Ok(acc)},
             Self::Expression(e) => func(e)
         }
     }
-
+ 
     pub fn for_each_method_while<'a, F>(&'a self, func:&mut F) -> Result<bool, Error> where F: FnMut(&'a Self) -> Result<bool, Error> {
         match self {
             Self::Task{body,..} => body.for_each_method_while(func),
@@ -562,10 +562,10 @@ impl Stmt {
         }
     }
 
-    pub fn preconditions(&self) -> Result<&Option<Expr>, Error> {
-        match &self {
+    pub fn preconditions(&self) -> Result<Option<Rc<Expr>>, Error> {
+        match self {
             Self::Method{preconditions, ..} |
-            Self::Task{preconditions, ..} => Ok(preconditions),
+            Self::Task{preconditions, ..} => Ok(preconditions.to_owned()),
             _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
         }
     }
@@ -783,7 +783,7 @@ impl Parser {
             let name = Rc::new(name.clone());
             let mut preconditions = None;
             pmatch!(self, TokenData::OPEN_PAREN, {
-                preconditions = Some(self.expression()?);
+                preconditions = Some(Rc::new(self.expression()?));
                 pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after task conditions.")?
             });
             pexpect_prevtoken!(self, TokenData::COLON, {
@@ -823,19 +823,19 @@ impl Parser {
         let token_id = self.idx-1;
         pexpect!(self, TokenData::LABEL(name), {
             let name = Rc::new(name.clone());
-            let mut preconditions: Option<Expr> = None;
+            let mut preconditions: Option<Rc<Expr>> = None;
             pmatch!(self, TokenData::OPEN_PAREN, {
-                preconditions = Some(self.expression()?);
+                preconditions = Some(Rc::new(self.expression()?));
                 pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after method conditions.'")?;
             });
             pexpect_prevtoken!(self, TokenData::COLON, {
-                let parent_statemet = Stmt::Method{name:name.clone(), preconditions:preconditions.clone(), body:Box::new(self.statement()?), token:self.tokens[token_id].clone()};
+                let parent_statemet = Stmt::Method{name:name.clone(), preconditions:preconditions.to_owned(), body:Box::new(self.statement()?), token:self.tokens[token_id].clone()};
                 if preconditions.is_some() {
                     ptest!(self, TokenData::ELSE, {
                         let token_id = self.idx-1;
                         pexpect!(self, TokenData::COLON, {
-                            let else_conditions = Expr::Unary(Token{line:self.tokens[token_id].line, col:self.tokens[token_id].col, len:0, t:TokenData::NOT}, Box::new(preconditions.unwrap()));
-                            let else_statement = Stmt::Method{name:Rc::new(format!("Dont{}", name)), preconditions:Some(else_conditions), body:Box::new(self.statement()?), token:self.tokens[token_id].clone()};
+                            let else_conditions = Expr::Unary(Token{line:self.tokens[token_id].line, col:self.tokens[token_id].col, len:0, t:TokenData::NOT}, Box::new(preconditions.unwrap().as_ref().clone()));
+                            let else_statement = Stmt::Method{name:Rc::new(format!("Dont{}", name)), preconditions:Some(Rc::new(else_conditions)), body:Box::new(self.statement()?), token:self.tokens[token_id].clone()};
                             Ok(Stmt::Block(vec![parent_statemet, else_statement]))
                         }, "Expected ':' after else clause.")
                     } else {
@@ -899,7 +899,7 @@ impl Parser {
             eprintln!("{}:{} Error:", filepath, e.line); 
             eprintln!("\t{}: {}", line_number_string, eline);
             last_error_line = e.line;
-            let debug_str_col_pos = line_number_string.len() + 2 + e.col;
+            let debug_str_col_pos = line_number_string.len() + 1 + e.col;
             eprintln!("\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos); 
         }
     }

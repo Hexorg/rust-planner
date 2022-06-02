@@ -31,6 +31,13 @@ pub struct PlanStep {
     pub arguments:Vec<Rc<String>>
 }
 
+pub struct PlannedTask {
+    pub preconditions: Option<Rc<Expr>>,
+    pub name: Rc<String>,
+    pub operators: Vec<PlanStep>,
+    pub end_state: State,
+}
+
 impl From<&Expr> for PlanStep {
     fn from(expr: &Expr) -> Self {
         let assignment = if let Some(tgt) = expr.get_assignment_target() {
@@ -49,7 +56,7 @@ pub struct Planner<'a> {
     state: State,
     last_successfull_task:Rc<String>,
     method_heatmap:HashMap<Rc<String>, i32>,
-    plan: Vec<PlanStep>
+    plan: Vec<PlannedTask>
 }
 
 
@@ -61,7 +68,7 @@ impl Planner<'_>{
             if plan.len() > 0 {
                 for subtask in plan {
                     if !self.run_task(self.domain.tasks.get(&subtask).unwrap())? {
-                        panic!("Planner thought task is achievable but it's not");
+                        return Err(task.to_err(String::from("Planner thought task is achievable but it's not")));
                     }
                 }
                 self.run_task(task)
@@ -81,9 +88,11 @@ impl Planner<'_>{
         if task.are_preconditions_satisfied(&self.state.0)? == 1 {
             if let Stmt::Task{name,..} = task {
                 self.last_successfull_task = name.clone();
+                
             }
+            
             // println!("Running task {}", task.name()?);
-            if task.is_composite()? {
+            let run_result = if task.is_composite()? {
                 let mut queue = PriorityQueue::new();
                 task.for_each_method(&mut |method| {
                     let method_name = method.name()?;
@@ -98,33 +107,58 @@ impl Planner<'_>{
                     Ok(())
                 })?;
                 if queue.len() == 0 { // no methods are statically satisfied
-                    task.for_each_method_while(&mut |method| Ok(!self.plan_to_run_task(method)?))?;
+                    task.for_each_method_while(&mut |method| Ok(!self.plan_to_run_task(method)?))
                 } else {
-                    if let Some((method_name, _)) = queue.pop() {
-                        task.for_each_method_while(&mut |method| if method.name()? == method_name { self.method_heatmap.insert(method_name.clone(), self.method_heatmap.get(&method_name).or(Some(&0)).unwrap()+1);Ok(!self.run_task(method)?)} else { Ok(true) })?;
+                    let mut is_success = false;
+                    while let Some((method_name, _)) = queue.pop() {
+                        task.for_each_method_while(&mut |method| if method.name()? == method_name { 
+                            self.method_heatmap.insert(method_name.clone(), self.method_heatmap.get(&method_name).or(Some(&0)).unwrap()+1);
+                            is_success = self.run_task(method)?;
+                            Ok(!is_success)
+                        } else { 
+                            Ok(true) 
+                        })?;
+                        if is_success {
+                            break
+                        }
                     }
+                    Ok(is_success)
                 }
                 // println!("Done running composite task {}", task.name()?);
             } else {
+                let name = match task {
+                    Stmt::Task{name,..} => name.clone(),
+                    Stmt::Method{name,..} => Rc::new(format!("{}.{}", self.last_successfull_task, name)),
+                    _ => task.name()?,
+                };
+                self.plan.push(PlannedTask{name:name.clone(), preconditions:task.preconditions()?.to_owned(), operators:Vec::new(), end_state:State(HashMap::new())});
                 task.for_each_operator(&mut |op| {
                     let target = op.get_call_target().expect("Only call expressions are supported in task/method bodies.");
                     if let Some(task) = self.domain.tasks.get(&target) {
                         if !self.run_task(task)? {
-                            if !self.plan_to_run_task(task)? {
-                                panic!("No solutions found to run {} task", task.name()?);
+                            let can_plan = self.plan_to_run_task(task)?;
+                            if !can_plan {
+                                // Tasks preconditions are unmet. whatever is the unment precondition is the plan-state requirement now
+                                self.plan.last_mut().unwrap().end_state = self.state.clone();
                             }
+                            Ok(can_plan)
+                        } else {
+                            Ok(true)
                         }
                     } else {
                         // let op_type = if op.get_assignment_target().is_some() { "blackboard"} else { "simple" };
                         // println!("Calling {} operator {}", op_type, op);
-                        self.plan.push(PlanStep::from(op));
+                        self.plan.last_mut().unwrap().operators.push(PlanStep::from(op));
+                        Ok(true)
                     }
-                    Ok(())
-                })?;
+                })
                 // println!("Done running primitive task {}", task.name()?);
             };
-            task.effect(&mut self.state);
-            Ok(true)
+            if let Ok(true) = run_result {
+                task.effect(&mut self.state);
+                task.effect(&mut self.plan.last_mut().unwrap().end_state);
+            }
+            run_result
         } else {
             Ok(false)
         }
@@ -132,7 +166,7 @@ impl Planner<'_>{
     // fn run_main(&mut self) {
     //     self.run_stmt(self.ast.get(self.main_id).unwrap())
     // }
-    pub fn run<'a>(domain: &'a Domain, state:State) -> Result<Vec<PlanStep>, Error> {
+    pub fn run<'a>(domain: &'a Domain, state:State) -> Result<Vec<PlannedTask>, Error> {
         // let mut state = State(HashMap::new());
         // for task in domain.tasks.values() {
         //     for var in task.affects().iter().chain(task.depends().iter()) {

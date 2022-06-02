@@ -14,13 +14,22 @@ fn main() {
     // println!("-->{:>depth$}{}<--", "hello", depth=5);
     println!("{:?}", domain);
     let mut state = State(HashMap::new());
-    state.0.insert(Rc::new(String::from("hunger")), 10);
+    state.0.insert(Rc::new(String::from("hunger")), 0);
+    state.0.insert(Rc::new(String::from("have_supply_need")), 0);
     let plan = match Planner::run(&domain, state) {
         Ok(plan) => plan,
         Err(e) => {domain.print_parse_error(&e); panic!()},
     };
     for action in plan {
-        print!("{:?}: {}", action, action.arguments.len());
+        match action.preconditions {
+            Some(p) => print!("if {} then ", p),
+            _ => ()
+        }
+        println!("run {}:",action.name);
+        for op in action.operators {
+            println!("\t{}({})", op.operator, op.arguments.iter().fold(String::new(), |acc,item| acc + &format!("{}, ", item)));
+        }
+        println!("\tExpecting state: {:?}", action.end_state.0);
     }
     // match plan {
     //     Ok(plan) => println!("Plan: {:?}", plan),

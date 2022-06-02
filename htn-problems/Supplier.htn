@@ -1,3 +1,18 @@
 task Main:
 	method Eat(hunger > 0):
 		goto(delta, restaurant)
+		eat(delta, restaurant)
+	method Work:
+		target = find_supply_need()
+		Supply()
+	method Wait:
+		wait(delta)
+
+task Supply:
+	method Supply(have_supply_need):
+		goto(delta, warehouse)
+		pickup(delta, target)
+		goto(delta, target)
+		dropoff(delta, target)
+effects:
+	have_supply_need = false
