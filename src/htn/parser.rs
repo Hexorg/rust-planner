@@ -397,7 +397,6 @@ impl Expr {
 
     pub fn get_call_arguments(&self) -> Vec<Rc<String>> {
         let mut result = Vec::new();    
-        println!("{}", self);
         match self {
             Self::Call(_,_,arg_vec) => arg_vec.iter().for_each(|e| result.extend(e.world_variables().iter().map(|v| v.clone()))),
             Self::Assignment(_,left,_) => result.extend(left.get_call_arguments()),

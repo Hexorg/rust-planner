@@ -53,14 +53,14 @@ impl From<&Expr> for PlanStep {
 
 pub struct Planner<'a> {
     domain: &'a Domain,
-    state: State,
+    pub state: State,
     last_successfull_task:Rc<String>,
     method_heatmap:HashMap<Rc<String>, i32>,
-    plan: Vec<PlannedTask>
+    pub plan: Vec<PlannedTask>
 }
 
 
-impl Planner<'_>{
+impl<'a> Planner<'a>{
 
     fn plan_to_run_task(&mut self, task:&Stmt) -> Result<bool, Error> {
         let start = StateAndPath{state:self.state.clone(), method_name:self.last_successfull_task.clone()};
@@ -166,17 +166,13 @@ impl Planner<'_>{
     // fn run_main(&mut self) {
     //     self.run_stmt(self.ast.get(self.main_id).unwrap())
     // }
-    pub fn run<'a>(domain: &'a Domain, state:State) -> Result<Vec<PlannedTask>, Error> {
-        // let mut state = State(HashMap::new());
-        // for task in domain.tasks.values() {
-        //     for var in task.affects().iter().chain(task.depends().iter()) {
-        //         state.0.insert(var.clone(), 0);
-        //     }
+    pub fn new(domain: &'a Domain) -> Self {
+        Planner{domain, state:State(HashMap::new()), plan:Vec::new(), method_heatmap:HashMap::new(), last_successfull_task:domain.main.clone()}
+    }
 
-        // }
-        // state.0.insert(Rc::new(String::from("WsCanSeeEnemy")), 1);
-        let mut planner = Planner{domain, state, plan:Vec::new(), method_heatmap:HashMap::new(), last_successfull_task:domain.main.clone()};
-        planner.run_task(domain.tasks.get(&domain.main).expect("Unable to find Main task"))?;
-        Ok(planner.plan)
+    pub fn plan(&mut self) -> Result<bool, Error>{
+        self.plan = Vec::new();
+        self.last_successfull_task = self.domain.main.clone();
+        self.run_task(self.domain.tasks.get(&self.domain.main).expect("Unable to find Main task"))
     }
 }

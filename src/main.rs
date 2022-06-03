@@ -1,26 +1,25 @@
 mod htn;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use htn::domain::{Domain};
-use htn::planner::{Planner, State};
+use htn::planner::{Planner};
 
 fn main() {
-    println!("Starting...");
     let domain = match Domain::from_file("htn-problems/Supplier.htn") {
         Ok(domain) => domain,
         Err(e) => {eprintln!("{}", e); panic!()},
     };
-    // println!("-->{:>depth$}{}<--", "hello", depth=5);
-    println!("{:?}", domain);
-    let mut state = State(HashMap::new());
-    state.0.insert(Rc::new(String::from("hunger")), 0);
-    state.0.insert(Rc::new(String::from("have_supply_need")), 0);
-    let plan = match Planner::run(&domain, state) {
-        Ok(plan) => plan,
-        Err(e) => {domain.print_parse_error(&e); panic!()},
-    };
-    for action in plan {
+
+    //println!("{:?}", domain);
+    let mut planner = Planner::new(&domain);
+    planner.state.0.insert(Rc::new(String::from("hunger")), 0);
+    planner.state.0.insert(Rc::new(String::from("have_supply_need")), 0);
+    match planner.plan() {
+        Ok(true) => println!("Planer finished successfully."),
+        Ok(false) => println!("Planer was not able to find full solution - the plan is partial"),
+        Err(e) => domain.print_parse_error(&e),
+    }
+    for action in planner.plan {
         match action.preconditions {
             Some(p) => print!("if {} then ", p),
             _ => ()
