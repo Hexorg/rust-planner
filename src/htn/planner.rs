@@ -51,27 +51,25 @@ impl From<&Expr> for PlanStep {
     }
 }
 
-pub struct Planner<'a> {
-    domain: &'a Domain,
-    pub state: State,
-    last_successfull_task:Rc<String>,
+pub struct Planner {
+    pub plan:Vec<PlannedTask>,
+    last_successfull_task:Option<Rc<String>>,
     method_heatmap:HashMap<Rc<String>, i32>,
-    pub plan: Vec<PlannedTask>
 }
 
 
-impl<'a> Planner<'a>{
+impl Planner{
 
-    fn plan_to_run_task(&mut self, task:&Stmt) -> Result<bool, Error> {
-        let start = StateAndPath{state:self.state.clone(), method_name:self.last_successfull_task.clone()};
-        if let Some(plan) = Astar(start, task, |f| 4, self.domain) {
+    fn plan_to_run_task(&mut self, state:&mut State, task:&Stmt, domain:&Domain) -> Result<bool, Error> {
+        let start = StateAndPath{state:state.clone(), method_name:self.last_successfull_task.as_ref().unwrap().clone()};
+        if let Some(plan) = Astar(start, task, |f| 4, domain) {
             if plan.len() > 0 {
                 for subtask in plan {
-                    if !self.run_task(self.domain.tasks.get(&subtask).unwrap())? {
+                    if !self.run_task(state, domain.tasks.get(&subtask).unwrap(), domain)? {
                         return Err(task.to_err(String::from("Planner thought task is achievable but it's not")));
                     }
                 }
-                self.run_task(task)
+                self.run_task(state, task, domain)
             } else {
                 Ok(false)
             }
@@ -81,13 +79,13 @@ impl<'a> Planner<'a>{
     }
  
 
-    fn run_task(&mut self, task: &Stmt) -> Result<bool, Error> {
-        if self.plan.len() > 40 && task.name()? == self.domain.main {
+    fn run_task(&mut self, state:&mut State, task: &Stmt, domain:&Domain) -> Result<bool, Error> {
+        if self.plan.len() > 40 && task.name()? == domain.main {
             return Ok(true)
         }
-        if task.are_preconditions_satisfied(&self.state.0)? == 1 {
+        if task.are_preconditions_satisfied(&state.0)? == 1 {
             if let Stmt::Task{name,..} = task {
-                self.last_successfull_task = name.clone();
+                self.last_successfull_task = Some(name.clone());
                 
             }
             
@@ -96,7 +94,7 @@ impl<'a> Planner<'a>{
                 let mut queue = PriorityQueue::new();
                 task.for_each_method(&mut |method| {
                     let method_name = method.name()?;
-                    if method.are_preconditions_satisfied(&self.state.0)? == 1 {
+                    if method.are_preconditions_satisfied(&state.0)? == 1 {
                         queue.push(
                             method_name.clone(), 
                             Reverse(*self.method_heatmap.get(&method_name).or(Some(&0)).unwrap())
@@ -107,13 +105,13 @@ impl<'a> Planner<'a>{
                     Ok(())
                 })?;
                 if queue.len() == 0 { // no methods are statically satisfied
-                    task.for_each_method_while(&mut |method| Ok(!self.plan_to_run_task(method)?))
+                    task.for_each_method_while(&mut |method| Ok(!self.plan_to_run_task(state, method, domain)?))
                 } else {
                     let mut is_success = false;
                     while let Some((method_name, _)) = queue.pop() {
                         task.for_each_method_while(&mut |method| if method.name()? == method_name { 
                             self.method_heatmap.insert(method_name.clone(), self.method_heatmap.get(&method_name).or(Some(&0)).unwrap()+1);
-                            is_success = self.run_task(method)?;
+                            is_success = self.run_task(state, method, domain)?;
                             Ok(!is_success)
                         } else { 
                             Ok(true) 
@@ -128,18 +126,18 @@ impl<'a> Planner<'a>{
             } else {
                 let name = match task {
                     Stmt::Task{name,..} => name.clone(),
-                    Stmt::Method{name,..} => Rc::new(format!("{}.{}", self.last_successfull_task, name)),
+                    Stmt::Method{name,..} => Rc::new(format!("{}.{}", self.last_successfull_task.as_ref().unwrap(), name)),
                     _ => task.name()?,
                 };
                 self.plan.push(PlannedTask{name:name.clone(), preconditions:task.preconditions()?.to_owned(), operators:Vec::new(), end_state:State(HashMap::new())});
                 task.for_each_operator(&mut |op| {
                     let target = op.get_call_target().expect("Only call expressions are supported in task/method bodies.");
-                    if let Some(task) = self.domain.tasks.get(&target) {
-                        if !self.run_task(task)? {
-                            let can_plan = self.plan_to_run_task(task)?;
+                    if let Some(task) = domain.tasks.get(&target) {
+                        if !self.run_task(state, task, domain)? {
+                            let can_plan = self.plan_to_run_task(state, task, domain)?;
                             if !can_plan {
                                 // Tasks preconditions are unmet. whatever is the unment precondition is the plan-state requirement now
-                                self.plan.last_mut().unwrap().end_state = self.state.clone();
+                                self.plan.last_mut().unwrap().end_state = state.clone();
                             }
                             Ok(can_plan)
                         } else {
@@ -155,7 +153,7 @@ impl<'a> Planner<'a>{
                 // println!("Done running primitive task {}", task.name()?);
             };
             if let Ok(true) = run_result {
-                task.effect(&mut self.state);
+                task.effect(state);
                 task.effect(&mut self.plan.last_mut().unwrap().end_state);
             }
             run_result
@@ -166,13 +164,12 @@ impl<'a> Planner<'a>{
     // fn run_main(&mut self) {
     //     self.run_stmt(self.ast.get(self.main_id).unwrap())
     // }
-    pub fn new(domain: &'a Domain) -> Self {
-        Planner{domain, state:State(HashMap::new()), plan:Vec::new(), method_heatmap:HashMap::new(), last_successfull_task:domain.main.clone()}
+    pub fn new() -> Self {
+        Planner{plan:Vec::new(), method_heatmap:HashMap::new(), last_successfull_task:None}
     }
 
-    pub fn plan(&mut self) -> Result<bool, Error>{
-        self.plan = Vec::new();
-        self.last_successfull_task = self.domain.main.clone();
-        self.run_task(self.domain.tasks.get(&self.domain.main).expect("Unable to find Main task"))
+    pub fn plan(&mut self, state:&State, domain: &Domain) -> Result<bool, Error>{
+        let mut state = state.clone();
+        self.run_task(&mut state, domain.tasks.get(&domain.main).expect("Unable to find Main task"), domain)
     }
 }

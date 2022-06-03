@@ -1,8 +1,10 @@
 mod htn;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use htn::domain::{Domain};
 use htn::planner::{Planner};
+use htn::planner::State;
 
 fn main() {
     let domain = match Domain::from_file("htn-problems/Supplier.htn") {
@@ -11,10 +13,11 @@ fn main() {
     };
 
     //println!("{:?}", domain);
-    let mut planner = Planner::new(&domain);
-    planner.state.0.insert(Rc::new(String::from("hunger")), 0);
-    planner.state.0.insert(Rc::new(String::from("have_supply_need")), 0);
-    match planner.plan() {
+    let mut planner = Planner::new();
+    let mut state = State(HashMap::new());
+    state.0.insert(Rc::new(String::from("hunger")), 0);
+    state.0.insert(Rc::new(String::from("have_supply_need")), 0);
+    match planner.plan(&state, &domain) {
         Ok(true) => println!("Planer finished successfully."),
         Ok(false) => println!("Planer was not able to find full solution - the plan is partial"),
         Err(e) => domain.print_parse_error(&e),
