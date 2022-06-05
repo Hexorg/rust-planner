@@ -17,6 +17,8 @@ fn main() {
     let mut state = State(HashMap::new());
     state.0.insert(Rc::new(String::from("hunger")), 0);
     state.0.insert(Rc::new(String::from("have_supply_need")), 0);
+    state.0.insert(Rc::new(String::from("carryFood")), 0);
+    state.0.insert(Rc::new(String::from("at")), 0);
     match planner.plan(&state, &domain) {
         Ok(true) => println!("Planer finished successfully."),
         Ok(false) => println!("Planer was not able to find full solution - the plan is partial"),

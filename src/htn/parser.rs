@@ -25,6 +25,7 @@ pub enum TokenData {
     METHOD,
     ELSE,
     EFFECTS,
+    PASS,
     LABEL(String),
     LITERAL(i32),
     COMMA,
@@ -77,6 +78,7 @@ impl fmt::Display for TokenData {
             Self::METHOD => write!(f, "METHOD"),
             Self::ELSE => write!(f, "ELSE"),
             Self::EFFECTS => write!(f, "EFFECTS"),
+            Self::PASS => write!(f, "PASS"),
             Self::LABEL(l) => write!(f, "{}", l),
             Self::LITERAL(l) => write!(f, "'{}'", l),
             Self::COMMA => write!(f, ","),
@@ -210,6 +212,7 @@ impl Lexer {
                                         "method" => Some(TokenData::METHOD),
                                         "else" => Some(TokenData::ELSE),
                                         "effects" => Some(TokenData::EFFECTS),
+                                        "pass" => Some(TokenData::PASS),
                                         "or" => Some(TokenData::OR),
                                         "and" => Some(TokenData::AND),
                                         "not" => Some(TokenData::NOT),
@@ -298,7 +301,8 @@ pub enum Expr {
     Variable(Rc<String>, Token),
     Unary(Token, Box<Expr>), // Token right
     Assignment(Rc<String>, Box<Expr>, Token), // name, value
-    Call(Rc<String>, Token, Vec<Expr>) // callee, closing parenthesis token, args
+    Call(Rc<String>, Token, Vec<Expr>), // callee, closing parenthesis token, args
+    Noop(Token)
 }
 
 impl std::fmt::Display for Expr {
@@ -316,6 +320,7 @@ impl std::fmt::Display for Expr {
                 args.iter().skip(1).try_for_each(|expr| write!(f, ", {}", expr))?; 
                 write!(f, ")")
             },
+            Self::Noop(t) => write!(f, "{}", t),
         }
     }
 }
@@ -353,7 +358,9 @@ impl Expr {
             Self::Unary(op, right) => if let NOT = op.t { if right.eval(state)? == 0 { Ok(1) } else { Ok(0) } } else { 
                 Err(Error{line:op.line, col:op.col, message:String::from("Unexpected unary operator.")})
             },
-            Expr::Call(_, tok, _) | Expr::Assignment(_,_,tok) => Err(Error{line:tok.line, col:tok.col, message:String::from("Unable to evaluate this expression.")}),
+            Expr::Call(_, tok, _) | 
+            Expr::Assignment(_,_,tok) |
+            Expr::Noop(tok) => Err(Error{line:tok.line, col:tok.col, message:String::from("Unable to evaluate this expression.")}),
             
         }
     }
@@ -374,7 +381,8 @@ impl Expr {
             Self::Assignment(var, sub, _) => {vars.insert(var.clone()); vars.extend(sub.world_variables());},
             Self::Variable(var, _) => {vars.insert(var.clone());},
             Self::Literal(_, _) |
-            Self::Call(_, _, _) => (),
+            Self::Call(_, _, _) |
+            Self::Noop(_) => (),
         }
         vars
     }
@@ -407,25 +415,27 @@ impl Expr {
 
     pub fn to_err(&self, msg:String) -> Error {
         match self {
-            Expr::Binary(_, tok, _) |
-            Expr::Grouping(_, tok) |
-            Expr::Literal(_, tok) |
-            Expr::Variable(_, tok) |
-            Expr::Unary(tok, _) |
-            Expr::Assignment(_, _, tok) |
-            Expr::Call(_, tok, _) => Error{line:tok.line, col:tok.col, message:msg}
+            Self::Binary(_, tok, _) |
+            Self::Grouping(_, tok) |
+            Self::Literal(_, tok) |
+            Self::Variable(_, tok) |
+            Self::Unary(tok, _) |
+            Self::Assignment(_, _, tok) |
+            Self::Call(_, tok, _) |
+            Self::Noop(tok) => Error{line:tok.line, col:tok.col, message:msg}
         }
     }
 
     pub fn line_no(&self) -> usize {
         match self {
-            Expr::Binary(_, tok, _) |
-            Expr::Grouping(_, tok) |
-            Expr::Literal(_, tok) |
-            Expr::Variable(_, tok) |
-            Expr::Unary(tok, _) |
-            Expr::Assignment(_, _, tok) |
-            Expr::Call(_, tok, _) => tok.line
+            Self::Binary(_, tok, _) |
+            Self::Grouping(_, tok) |
+            Self::Literal(_, tok) |
+            Self::Variable(_, tok) |
+            Self::Unary(tok, _) |
+            Self::Assignment(_, _, tok) |
+            Self::Call(_, tok, _) |
+            Self::Noop(tok) => tok.line
         }
     }
 }
@@ -654,6 +664,28 @@ impl Parser {
             self.idx += 1;
         }
     }
+    fn primary(&mut self) -> Result<Expr, Error> {
+        // Literal | "(" expression ")"
+        if let TokenData::LITERAL(val)  = self.tokens[self.idx].t {
+            self.idx += 1;
+            Ok(Expr::Literal(val, self.tokens[self.idx].clone()))
+        } else if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
+            self.idx += 1;
+            let expr = self.expression()?;
+            pexpect!(self, TokenData::CLOSE_PAREN, {
+                Ok(Expr::Grouping(Box::new(expr), self.tokens[self.idx].clone()))
+            }, "Expected ')' after expression.")
+        } else if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
+            self.idx += 1;
+            Ok(Expr::Variable(Rc::new(name.clone()), self.tokens[self.idx-1].clone()))
+        } else if let TokenData::PASS = &self.tokens[self.idx].t {
+            self.idx += 1;
+            Ok(Expr::Noop(self.tokens[self.idx-1].clone()))
+        } else {
+            perror!(self, 0, "Expected expression.")
+        }
+
+    }
     fn call(&mut self) -> Result<Expr, Error> {
         let expr = self.primary()?;
         ptest!(self, TokenData::OPEN_PAREN, {
@@ -754,25 +786,7 @@ impl Parser {
     fn expression(&mut self) -> Result<Expr, Error> {
         self.assignment()
     }
-    fn primary(&mut self) -> Result<Expr, Error> {
-        // Literal | "(" expression ")"
-        if let TokenData::LITERAL(val)  = self.tokens[self.idx].t {
-            self.idx += 1;
-            Ok(Expr::Literal(val, self.tokens[self.idx].clone()))
-        } else if let TokenData::OPEN_PAREN = self.tokens[self.idx].t {
-            self.idx += 1;
-            let expr = self.expression()?;
-            pexpect!(self, TokenData::CLOSE_PAREN, {
-                Ok(Expr::Grouping(Box::new(expr), self.tokens[self.idx].clone()))
-            }, "Expected ')' after expression.")
-        } else if let TokenData::LABEL(name) = &self.tokens[self.idx].t {
-            self.idx += 1;
-            Ok(Expr::Variable(Rc::new(name.clone()), self.tokens[self.idx-1].clone()))
-        } else {
-            perror!(self, 0, "Expected expression.")
-        }
 
-    }
     fn effects_statement(&mut self) -> Result<Stmt, Error> {
         pexpect_prevtoken!(self, TokenData::COLON, {self.statement()}, "Expected ':' after 'effects'.")
     }

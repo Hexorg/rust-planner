@@ -31,11 +31,76 @@ pub struct PlanStep {
     pub arguments:Vec<Rc<String>>
 }
 
+impl std::fmt::Display for PlanStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.operator)
+    }
+}
+
 pub struct PlannedTask {
     pub preconditions: Option<Rc<Expr>>,
     pub name: Rc<String>,
     pub operators: Vec<PlanStep>,
     pub end_state: State,
+}
+
+impl std::fmt::Display for PlannedTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}(", self.name)?;
+        let mut i = self.operators.iter();
+        i.by_ref().take(1).try_for_each(|op| write!(f, "{}", op))?;
+        i.try_for_each(|op| write!(f, ", {}", op))?;
+        write!(f, ")")
+    }
+}
+
+pub struct Plan (
+     Vec<PlannedTask>
+);
+
+impl std::iter::IntoIterator for Plan { // So that you can say `for action in plan`
+    type Item = PlannedTask;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl Plan {
+    #[inline]
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[inline]
+    pub fn push(&mut self, task: PlannedTask) {
+        self.0.push(task)
+    }
+
+    #[inline]
+    pub fn last_mut(&mut self) -> Option<&mut PlannedTask> {
+        self.0.last_mut()
+    }
+
+    #[inline]
+    pub fn get(&self, index:usize) -> Option<&PlannedTask> {
+        self.0.get(index)
+    }
+}
+
+impl std::fmt::Display for Plan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut i = self.0.iter();
+        i.by_ref().take(1).try_for_each(|task| write!(f, "{}", task))?;
+        i.try_for_each(|task| write!(f, ", {}", task))
+    }
 }
 
 impl From<&Expr> for PlanStep {
@@ -52,7 +117,7 @@ impl From<&Expr> for PlanStep {
 }
 
 pub struct Planner {
-    pub plan:Vec<PlannedTask>,
+    pub plan:Plan,
     last_successfull_task:Option<Rc<String>>,
     method_heatmap:HashMap<Rc<String>, i32>,
 }
@@ -131,23 +196,25 @@ impl Planner{
                 };
                 self.plan.push(PlannedTask{name:name.clone(), preconditions:task.preconditions()?.to_owned(), operators:Vec::new(), end_state:State(HashMap::new())});
                 task.for_each_operator(&mut |op| {
-                    let target = op.get_call_target().expect("Only call expressions are supported in task/method bodies.");
-                    if let Some(task) = domain.tasks.get(&target) {
-                        if !self.run_task(state, task, domain)? {
-                            let can_plan = self.plan_to_run_task(state, task, domain)?;
-                            if !can_plan {
-                                // Tasks preconditions are unmet. whatever is the unment precondition is the plan-state requirement now
-                                self.plan.last_mut().unwrap().end_state = state.clone();
+                    if let Expr::Noop(_) = op { Ok(true) } else {
+                        let target = op.get_call_target().expect("Only call expressions are supported in task/method bodies.");
+                        if let Some(task) = domain.tasks.get(&target) {
+                            if !self.run_task(state, task, domain)? {
+                                let can_plan = self.plan_to_run_task(state, task, domain)?;
+                                if !can_plan {
+                                    // Tasks preconditions are unmet. whatever is the unment precondition is the plan-state requirement now
+                                    self.plan.last_mut().unwrap().end_state = state.clone();
+                                }
+                                Ok(can_plan)
+                            } else {
+                                Ok(true)
                             }
-                            Ok(can_plan)
                         } else {
+                            // let op_type = if op.get_assignment_target().is_some() { "blackboard"} else { "simple" };
+                            // println!("Calling {} operator {}", op_type, op);
+                            self.plan.last_mut().unwrap().operators.push(PlanStep::from(op));
                             Ok(true)
                         }
-                    } else {
-                        // let op_type = if op.get_assignment_target().is_some() { "blackboard"} else { "simple" };
-                        // println!("Calling {} operator {}", op_type, op);
-                        self.plan.last_mut().unwrap().operators.push(PlanStep::from(op));
-                        Ok(true)
                     }
                 })
                 // println!("Done running primitive task {}", task.name()?);
@@ -165,10 +232,11 @@ impl Planner{
     //     self.run_stmt(self.ast.get(self.main_id).unwrap())
     // }
     pub fn new() -> Self {
-        Planner{plan:Vec::new(), method_heatmap:HashMap::new(), last_successfull_task:None}
+        Planner{plan:Plan::new(), method_heatmap:HashMap::new(), last_successfull_task:None}
     }
 
     pub fn plan(&mut self, state:&State, domain: &Domain) -> Result<bool, Error>{
+        self.plan = Plan::new();
         let mut state = state.clone();
         self.run_task(&mut state, domain.tasks.get(&domain.main).expect("Unable to find Main task"), domain)
     }
