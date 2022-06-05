@@ -9,6 +9,15 @@ task Main:
 
 task Eat(carryFood):
 	eat(target)
+effects:
+	carryFood = false
+
+task Forage(!carryFood):
+	goto(berries)
+	target = chooseFood()
+	pickup(target)
+effects:
+	carryFood = true
 
 task GotoRestaurant(at != 1):
 	goto(restaurant)
@@ -20,6 +29,7 @@ task BuyFood(at==1 & !carryFood):
 	pickup(target)
 effects:
 	carryFood = true
+
 
 
 task Supply(have_supply_need):
