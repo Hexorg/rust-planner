@@ -24,7 +24,7 @@ impl std::cmp::Eq for State {
 
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PlanStep {
     pub assignment: Option<Rc<String>>,
     pub operator: Rc<String>,
@@ -34,6 +34,19 @@ pub struct PlanStep {
 impl std::fmt::Display for PlanStep {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.operator)
+    }
+}
+
+impl std::fmt::Debug for PlanStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(ref assgn) = self.assignment {
+            write!(f, "{} = ", assgn)?;
+        }
+        write!(f, "{}(", self.operator)?;
+        let mut i = self.arguments.iter();
+        i.by_ref().take(1).try_for_each(|i| write!(f, "{}", i))?;
+        i.try_for_each(|i| write!(f, ", {}", i))?;
+        writeln!(f, ")")
     }
 }
 
@@ -73,14 +86,32 @@ impl std::fmt::Display for PlannedTask {
     }
 }
 
+impl std::fmt::Debug for PlannedTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Cost: {} ", self.cost)?;
+        if let Some(ref preconditions) = self.preconditions {
+            write!(f, "if {} then ", preconditions)?;
+        }
+        writeln!(f, "{}:", self.name)?;
+        let mut i = self.operators.iter();
+        i.try_for_each(|op| write!(f, "\t{:?}", op))?;
+        writeln!(f, "\tExpected state: {:?}", self.end_state.0)
+    }
+}
+
 impl From<&Stmt> for PlannedTask {
-    fn from(_: &Stmt) -> Self {
-        todo!()
+    fn from(stmt: &Stmt) -> Self {
+        let preconditions = stmt.preconditions().unwrap();
+        let name = stmt.name().unwrap();
+        let cost = 0;
+        let operators = Vec::new();
+        let end_state = State(HashMap::new());
+        PlannedTask{preconditions, name, cost, operators, end_state}
     }
 }
 
 pub struct Plan (
-     Vec<PlannedTask>
+     pub Vec<PlannedTask>
 );
 
 impl std::iter::IntoIterator for Plan { // So that you can say `for action in plan`
@@ -131,9 +162,18 @@ impl Plan {
 
 impl std::fmt::Display for Plan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} task plan(Cost: {}): ", self.0.len(), self.total_cost())?;
         let mut i = self.0.iter();
         i.by_ref().take(1).try_for_each(|task| write!(f, "{}", task))?;
         i.try_for_each(|task| write!(f, ", {}", task))
+    }
+}
+
+impl std::fmt::Debug for Plan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut i = self.0.iter();
+        //i.by_ref().take(1).try_for_each(|task| write!(f, "{:?}", task))?;
+        i.try_for_each(|task| write!(f, "{:?}", task))
     }
 }
 
@@ -167,6 +207,25 @@ impl From<&Expr> for PlanStep {
         Self{assignment, operator, arguments}
     }
 }
+
+struct MethodPlan<'a> {
+    method: &'a Stmt,
+    plan: Plan
+}
+
+impl std::hash::Hash for MethodPlan<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.plan.hash(state)
+    }
+}
+
+impl std::cmp::PartialEq for MethodPlan<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.plan == other.plan
+    }
+}
+
+impl std::cmp::Eq for MethodPlan<'_> { }
 
 pub struct Planner {
     pub plan:Plan,
@@ -291,44 +350,57 @@ impl Planner{
         } else {
             self.entry_name.clone()
         };
+        // println!("Trying to reach {}...", task.name()?);
         let start = StateAndPath{state:state.clone(), cost:0, method_name:last_task};
         if let Some(plan) = Astar(start.clone(), task, |f| 4, domain) {
+            // println!("\tFound plan...");
             for subtask in plan {
+                // println!("Running planned subtask {}", subtask.name);
                 if !self.run_astar_only(state, domain.get_task(&subtask.name).unwrap(), domain)? {
                     return Err(task.to_err(String::from("Planner thought task is achievable but it's not")));
                 }
             }
             // Ready to run this task
-            println!("Running task {}", task.name().unwrap());
+            // println!("Running task {}", task.name().unwrap());
             if task.is_composite()? {
                 let mut method_plans = PriorityQueue::new();
                 task.for_each_method(&mut |method| {
-                    if let Some(mut mp) = Astar(start.clone(), method, |f| 10, domain){
+                    if let Some(mp) = Astar(start.clone(), method, |f| 10, domain){
                         let mp_cost = mp.total_cost();
                         let method_name = method.name()?;
-                        mp.push(PlannedTask{name:method_name.clone(), cost:*domain.get_cost(&method_name).unwrap_or(&9999), end_state:State(HashMap::new()), operators:Vec::new(), preconditions:None});
-                        method_plans.push(mp, mp_cost);
+                        method_plans.push(MethodPlan{plan:mp, method}, mp_cost);
                     }
                     Ok(())
                 })?;
-                if let Some((plan, cost)) = method_plans.pop() {
+                if let Some((MethodPlan{plan, method}, cost)) = method_plans.pop() {
                     // Cheapest cost is to run this method
-                    println!("Best method is {}", plan.0.last().unwrap());
-                    let mut plan_step = plan.0.last().unwrap().clone();
-                    plan_step.name = Rc::new(format!("{}.{}", task.name()?.as_str(), plan_step.name));
-                    self.plan.push(plan_step);
+                    // println!("Running method {}.{} (plan len = {})", task.name().unwrap(), method.name().unwrap(), plan.len());
                     for subtask in plan {
                         if !self.run_astar_only(state, domain.get_task(&subtask.name).unwrap(), domain)? {
                             return Err(task.to_err(String::from("Planner thought task is achievable but it's not")));
                         }
                     }
-                    Ok(true)
+                    // ready to run method
+                    self.plan.push(PlannedTask::from(method));
+                    self.plan.last_mut().unwrap().name = Rc::new(format!("{}.{}", task.name()?, method.name()?));
+                    self.plan.last_mut().unwrap().cost = cost;
+                    method.for_each_operator(&mut |op| {
+                        if let Some(subtask) = domain.get_task(&op.get_call_target().unwrap()) {
+                            self.run_astar_only(state, subtask, domain)
+                        } else {
+                            // call to an operator
+                            self.plan.last_mut().unwrap().operators.push(PlanStep::from(op));
+                            Ok(true)
+                        }
+                    })
                 } else {
                     // no methods are reachable
                     Ok(false) 
                 }
             } else {
-                self.plan.push(task)
+                // println!("\tPrimitive task");
+                self.plan.push(PlannedTask::from(task));
+                self.plan.last_mut().unwrap().cost = *domain.get_cost(&task.name()?).unwrap();
                 task.for_each_operator(&mut |op| {
                     if let Some(subtask) = domain.get_task(&op.get_call_target().unwrap()) {
                         self.run_astar_only(state, subtask, domain)

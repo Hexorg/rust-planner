@@ -7,7 +7,7 @@ use super::parser::{Expr, Stmt};
 use super::planner::{State, Planner, Plan};
 use priority_queue::PriorityQueue;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StateAndPath {
     pub state:State,
     pub method_name:Rc<String>,
@@ -32,23 +32,25 @@ impl std::cmp::Eq for StateAndPath { }
 // impl Astar {
     fn reconstruct_path<'a>(came_from:HashMap<Rc<String>, StateAndPath>, current:StateAndPath) -> Plan where {
         let mut plan = Plan::new();
-        // println!("Reconstructing path...");
+        // print!("Reconstructing path... ");
         // print!("{}({}), ", current.method_name, current.cost);
         let mut planned_task = PlannedTask{name:current.method_name.clone(), cost:current.cost, end_state:current.state.clone(), operators:Vec::new(), preconditions:None};
-        // plan.push(planned_task.clone());
+        plan.push(planned_task.clone());
+        let mut current = current;
+        // print!("{}({}), ", current.method_name, current.cost);
         while came_from.contains_key(&current.method_name) {
-            let current = &came_from[&current.method_name];
+            current = came_from[&current.method_name].clone();
             planned_task.name = current.method_name.clone();
             planned_task.cost = current.cost;
             plan.push(planned_task.clone());
             // print!("{}({}), ", current.method_name, current.cost);
         }
-        println!();
-        return plan;
+        // println!();
+        return Plan(plan.0.iter().rev().skip(1).map(|t| t.clone()).collect());
     }
     pub fn Astar<'a, F>(start:StateAndPath, goal:&'a Stmt, heuristic: F, domain:&'a Domain) -> Option<Plan> where  F: Fn(&StateAndPath)->i32 {
         let mut openSet = PriorityQueue::new();
-        let mut cameFrom = HashMap::new();
+        let mut cameFrom:HashMap<Rc<String>, StateAndPath> = HashMap::new();
 
         // For node n, gScore[n] is the cost of the cheapest path from start to n currently known.
         let mut gScore = HashMap::new();
@@ -68,19 +70,15 @@ impl std::cmp::Eq for StateAndPath { }
             if let Some((current, _)) = openSet.pop() {
                 if goal.are_preconditions_satisfied(&current.state.0).unwrap() == 1 {
                     // println!("goal preconditions are now satisfied with {:?}", current.state.0);
+                    // println!("came from:");
+                    // cameFrom.iter().for_each(|(k, v)| println!("From {} to {}", k, v.method_name));
                     return Some(reconstruct_path(cameFrom, current));
                 }
                 // println!("Getting neighbors of {}", current.last_task_name);
-                let neighbors = if is_first_run {
-                    is_first_run = false;
-                    domain.neighbors.get(&goal_name).unwrap()
-                } else {
-                    // domain.neighbors.get(&current.method_name).unwrap()
-                    &all_tasks
-                };
+                let neighbors = &all_tasks;
                 // println!("Looking at state that resulted from calling {}: {:?}", current.method_name, current.state);
                 for task_name in neighbors {
-                    // print!("Can we run {}? ", task_name);
+                    // println!("Can we run {}? ", task_name);
                     let (task, cost) = domain.get_task_and_cost(task_name).unwrap();
                     if task.are_preconditions_satisfied(&current.state.0).unwrap() == 1 {
                         // println!("conditions are satisfied");
