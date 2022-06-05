@@ -1,11 +1,14 @@
 task Main:
 	method Eat(hunger>5):
 		Eat()
-	method Work:
+	method Work(have_supply_need):
 		target = find_supply_need()
-		Supply()
+		goto(warehouse)
+		pickup(target)
+		goto(target)
+		dropoff(target)
 	method Wait:
-		wait()
+		Wait()
 
 task Eat(carryFood):
 	eat(target)
@@ -30,13 +33,8 @@ task BuyFood(at==1 & !carryFood):
 effects:
 	carryFood = true
 
-
-
-task Supply(have_supply_need):
-	goto(warehouse)
-	pickup(target)
-	goto(target)
-	dropoff(target)
+task Wait:
+	wait()
 	
 
 

@@ -171,9 +171,9 @@ impl std::fmt::Display for Plan {
 
 impl std::fmt::Debug for Plan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut i = self.0.iter();
+        writeln!(f, "{} task plan(Cost: {}): ", self.0.len(), self.total_cost())?;
         //i.by_ref().take(1).try_for_each(|task| write!(f, "{:?}", task))?;
-        i.try_for_each(|task| write!(f, "{:?}", task))
+        self.0.iter().try_for_each(|task| write!(f, "{:?}", task))
     }
 }
 
@@ -355,27 +355,27 @@ impl Planner{
         if let Some(plan) = Astar(start.clone(), task, |f| 4, domain) {
             // println!("\tFound plan...");
             for subtask in plan {
-                // println!("Running planned subtask {}", subtask.name);
+                // println!("\t\tRunning {} task's planned subtask {}", task.name()?, subtask.name);
                 if !self.run_astar_only(state, domain.get_task(&subtask.name).unwrap(), domain)? {
                     return Err(task.to_err(String::from("Planner thought task is achievable but it's not")));
                 }
             }
             // Ready to run this task
-            // println!("Running task {}", task.name().unwrap());
-            if task.is_composite()? {
+            let result = if task.is_composite()? {
                 let mut method_plans = PriorityQueue::new();
                 task.for_each_method(&mut |method| {
                     if let Some(mp) = Astar(start.clone(), method, |f| 10, domain){
                         let mp_cost = mp.total_cost();
-                        let method_name = method.name()?;
+                        // println!("Method {}.{} plan: {}", task.name().unwrap(), method.name().unwrap(), mp);
                         method_plans.push(MethodPlan{plan:mp, method}, mp_cost);
                     }
                     Ok(())
                 })?;
                 if let Some((MethodPlan{plan, method}, cost)) = method_plans.pop() {
                     // Cheapest cost is to run this method
-                    // println!("Running method {}.{} (plan len = {})", task.name().unwrap(), method.name().unwrap(), plan.len());
+                    // println!("\tRunning method {}.{} (plan len = {})", task.name()?, method.name()?, plan.len());
                     for subtask in plan {
+                        // println!("\t\tRunning method's {}.{} planned subtask {}", task.name()?, method.name()?, subtask.name);
                         if !self.run_astar_only(state, domain.get_task(&subtask.name).unwrap(), domain)? {
                             return Err(task.to_err(String::from("Planner thought task is achievable but it's not")));
                         }
@@ -398,7 +398,7 @@ impl Planner{
                     Ok(false) 
                 }
             } else {
-                // println!("\tPrimitive task");
+                // println!("\tRunning task {}", task.name().unwrap());
                 self.plan.push(PlannedTask::from(task));
                 self.plan.last_mut().unwrap().cost = *domain.get_cost(&task.name()?).unwrap();
                 task.for_each_operator(&mut |op| {
@@ -411,7 +411,9 @@ impl Planner{
                     }
                     
                 })
-            }
+            };
+            task.effect(state);
+            result
         } else {
             // this task isn't reachable
             Ok(false) 
