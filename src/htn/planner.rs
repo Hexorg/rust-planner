@@ -54,7 +54,6 @@ impl std::fmt::Debug for PlanStep {
 pub struct PlannedTask {
     pub preconditions: Option<Rc<Expr>>,
     pub name: Rc<String>,
-    pub cost: i32,
     pub operators: Vec<PlanStep>,
     pub end_state: State,
 }
@@ -62,14 +61,12 @@ pub struct PlannedTask {
 impl std::hash::Hash for PlannedTask {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.name.hash(state);
-        self.cost.hash(state);
     }
 }
 
 impl std::cmp::PartialEq for PlannedTask {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && 
-        self.cost == other.cost
+        self.name == other.name
     }
 }
 
@@ -88,7 +85,6 @@ impl std::fmt::Display for PlannedTask {
 
 impl std::fmt::Debug for PlannedTask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Cost: {} ", self.cost)?;
         if let Some(ref preconditions) = self.preconditions {
             write!(f, "if {} then ", preconditions)?;
         }
@@ -103,10 +99,9 @@ impl From<&Stmt> for PlannedTask {
     fn from(stmt: &Stmt) -> Self {
         let preconditions = stmt.preconditions().unwrap();
         let name = stmt.name().unwrap();
-        let cost = 0;
         let operators = Vec::new();
         let end_state = State(HashMap::new());
-        PlannedTask{preconditions, name, cost, operators, end_state}
+        PlannedTask{preconditions, name, operators, end_state}
     }
 }
 
@@ -350,6 +345,8 @@ impl Planner{
         } else {
             self.entry_name.clone()
         };
+
+
         // println!("Trying to reach {}...", task.name()?);
         let start = StateAndPath{state:state.clone(), cost:0, method_name:last_task};
         if let Some(plan) = Astar(start.clone(), task, |f| 4, domain) {
@@ -365,7 +362,7 @@ impl Planner{
                 let mut method_plans = PriorityQueue::new();
                 task.for_each_method(&mut |method| {
                     if let Some(mp) = Astar(start.clone(), method, |f| 10, domain){
-                        let mp_cost = mp.total_cost();
+                        let mp_cost = mp.total_cost() + method.cost().unwrap().unwrap_or(1);
                         // println!("Method {}.{} plan: {}", task.name().unwrap(), method.name().unwrap(), mp);
                         method_plans.push(MethodPlan{plan:mp, method}, mp_cost);
                     }
@@ -383,12 +380,16 @@ impl Planner{
                     // ready to run method
                     self.plan.push(PlannedTask::from(method));
                     self.plan.last_mut().unwrap().cost = cost;
-                    method.for_each_operator(&mut |op| {
-                        if let Some(subtask) = domain.get_task(&op.get_call_target().unwrap()) {
-                            self.run_astar_only(state, subtask, domain)
+                    method.for_each_operator(&mut |op:&Expr| {
+                        if !op.is_nop() {
+                            if let Some(subtask) = domain.get_task(&op.get_call_target().unwrap()) {
+                                self.run_astar_only(state, subtask, domain)
+                            } else {
+                                // call to an operator
+                                self.plan.last_mut().unwrap().operators.push(PlanStep::from(op));
+                                Ok(true)
+                            }
                         } else {
-                            // call to an operator
-                            self.plan.last_mut().unwrap().operators.push(PlanStep::from(op));
                             Ok(true)
                         }
                     })
@@ -399,16 +400,19 @@ impl Planner{
             } else {
                 // println!("\tRunning task {}", task.name().unwrap());
                 self.plan.push(PlannedTask::from(task));
-                self.plan.last_mut().unwrap().cost = *domain.get_cost(&task.name()?).unwrap();
-                task.for_each_operator(&mut |op| {
-                    if let Some(subtask) = domain.get_task(&op.get_call_target().unwrap()) {
-                        self.run_astar_only(state, subtask, domain)
+                self.plan.last_mut().unwrap().cost = domain.get_cost(&task.name()?).unwrap();
+                task.for_each_operator(&mut |op:&Expr| {
+                    if !op.is_nop() {
+                        if let Some(subtask) = domain.get_task(&op.get_call_target().unwrap()) {
+                            self.run_astar_only(state, subtask, domain)
+                        } else {
+                            // call to an operator
+                            self.plan.last_mut().unwrap().operators.push(PlanStep::from(op));
+                            Ok(true)
+                        }
                     } else {
-                        // call to an operator
-                        self.plan.last_mut().unwrap().operators.push(PlanStep::from(op));
                         Ok(true)
                     }
-                    
                 })
             };
             task.effect(state);

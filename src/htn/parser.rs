@@ -421,6 +421,13 @@ impl Expr {
         result
     }
 
+    pub fn is_nop(&self) -> bool {
+        match self {
+            Self::Noop(_) => true,
+            _ => false
+        }
+    }
+
     pub fn to_err(&self, msg:String) -> Error {
         match self {
             Self::Binary(_, tok, _) |

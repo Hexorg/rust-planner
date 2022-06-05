@@ -124,18 +124,20 @@ impl Domain {
         }
     }
 
-    pub fn get_cost(&self, name:&Rc<String>) -> Option<&i32> {
+    pub fn get_cost(&self, name:&Rc<String>) -> Option<i32> {
         if let Some(idx) = self.task_ids.get(name) {
-            self.task_cost.get(*idx)
+            let stmt = self.tasks.get(*idx).unwrap();
+            let cost = stmt.cost().unwrap().unwrap_or(1) * self.task_cost.get(*idx).unwrap_or(&1);
+            Some(cost)
         } else {
             None
         }
     }
 
-    pub fn get_task_and_cost(&self, name:&Rc<String>) -> Option<(&Stmt, &i32)> {
+    pub fn get_task_and_cost(&self, name:&Rc<String>) -> Option<(&Stmt, i32)> {
         if let Some(idx) = self.task_ids.get(name) {
             let stmt = self.tasks.get(*idx).unwrap();
-            let cost = self.task_cost.get(*idx).unwrap();
+            let cost = stmt.cost().unwrap().unwrap_or(1) * self.task_cost.get(*idx).unwrap_or(&1);
             return Some((stmt, cost))
         } else {
             None

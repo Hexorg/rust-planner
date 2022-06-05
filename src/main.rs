@@ -12,22 +12,22 @@ fn main() {
         Err(e) => {eprintln!("{}", e); panic!()},
     };
 
-    println!("{:?}", domain);
+    print!("{:?}", domain);
     let mut planner = Planner::new();
     let mut state = State(HashMap::new());
-    state.0.insert(Rc::new(String::from("hunger")), 10);
+    state.0.insert(Rc::new(String::from("hunger")), 6);
     state.0.insert(Rc::new(String::from("have_supply_need")), 0);
     state.0.insert(Rc::new(String::from("carryFood")), 0);
     state.0.insert(Rc::new(String::from("at")), 0);
 
-    // domain.set_cost(&Rc::new(String::from("Forage")), 5);
-    // domain.set_cost(&Rc::new(String::from("Wait")), 60);
+    domain.set_cost(&Rc::new(String::from("GotoRestaurant")), 20);
+    domain.set_cost(&Rc::new(String::from("Forage")), 3);
     match planner.plan(&state, &domain) {
         Ok(true) => println!("Planer finished successfully."),
         Ok(false) => println!("Planer was not able to find full solution - the plan is partial."),
         Err(e) => domain.print_parse_error(&e),
     }
-    println!("{:?}", planner.plan);
+    println!("{}", planner.plan);
     // for action in planner.plan {
     //     match action.preconditions {
     //         Some(p) => print!("if {} then ", p),
