@@ -12,10 +12,10 @@ fn main() {
         Err(e) => {eprintln!("{}", e); panic!()},
     };
 
-    //println!("{:?}", domain);
+    println!("{:?}", domain);
     let mut planner = Planner::new();
     let mut state = State(HashMap::new());
-    state.0.insert(Rc::new(String::from("hunger")), 0);
+    state.0.insert(Rc::new(String::from("hunger")), 56);
     state.0.insert(Rc::new(String::from("have_supply_need")), 0);
     state.0.insert(Rc::new(String::from("carryFood")), 0);
     state.0.insert(Rc::new(String::from("at")), 0);
