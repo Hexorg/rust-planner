@@ -33,7 +33,7 @@ task BuyFood(at==1 & !carryFood):
 effects:
 	carryFood = true
 
-task Wait:
+task Wait cost 5:
 	wait()
 	
 

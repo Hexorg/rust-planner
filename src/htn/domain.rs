@@ -170,7 +170,7 @@ impl Domain {
                 main_idx = Some(idx);
             }
             task_ids.insert(name.clone(), idx);
-            task_cost.push(1);
+            task_cost.push(stmt.cost()?.unwrap_or(1));
             
         }
     

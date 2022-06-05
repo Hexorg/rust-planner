@@ -25,6 +25,7 @@ pub enum TokenData {
     METHOD,
     ELSE,
     EFFECTS,
+    COST,
     PASS,
     LABEL(String),
     LITERAL(i32),
@@ -79,6 +80,7 @@ impl fmt::Display for TokenData {
             Self::ELSE => write!(f, "ELSE"),
             Self::EFFECTS => write!(f, "EFFECTS"),
             Self::PASS => write!(f, "PASS"),
+            Self::COST => write!(f, "COST"),
             Self::LABEL(l) => write!(f, "{}", l),
             Self::LITERAL(l) => write!(f, "'{}'", l),
             Self::COMMA => write!(f, ","),
@@ -213,6 +215,7 @@ impl Lexer {
                                         "else" => Some(TokenData::ELSE),
                                         "effects" => Some(TokenData::EFFECTS),
                                         "pass" => Some(TokenData::PASS),
+                                        "cost" => Some(TokenData::COST),
                                         "or" => Some(TokenData::OR),
                                         "and" => Some(TokenData::AND),
                                         "not" => Some(TokenData::NOT),
@@ -254,13 +257,18 @@ impl Lexer {
                     }
                     tab_depth += 1;
                 },
-                c if c.is_whitespace() && is_newline => { 
+                c if c.is_whitespace() => {
+                    if is_newline { 
                         if depth_separator.is_none() {
                             depth_separator = Some(DepthSeparator::SPACES(0));
                         } else if let Some(DepthSeparator::TABS) = depth_separator {
                             return Err(Error{line, col, message:String::from("Tabs and spaces can't be used together")})
                         }
                         tab_depth += 1; // tab_depth counts amount of spaces seen first. Then on the first non-whitespace character we convert amount of spaces to actual tab-depth
+                    }
+                    if if let Some(next_char) = it.peek() { next_char.is_alphanumeric() } else { false } {
+                        r.push(Token{line, col, len:1, t:TokenData::LABEL(String::new())})
+                    }
                 },
                 _ => (),
             }
@@ -320,7 +328,7 @@ impl std::fmt::Display for Expr {
                 args.iter().skip(1).try_for_each(|expr| write!(f, ", {}", expr))?; 
                 write!(f, ")")
             },
-            Self::Noop(t) => write!(f, "{}", t),
+            Self::Noop(_) => write!(f, "nop"),
         }
     }
 }
@@ -442,8 +450,22 @@ impl Expr {
 
 #[derive(Clone)]
 pub enum Stmt {
-    Method{name:Rc<String>, preconditions:Option<Rc<Expr>>, body:Box<Stmt>, token:Token}, // Name, condition, subtasks
-    Task{name:Rc<String>, preconditions:Option<Rc<Expr>>, body:Box<Stmt>, effects:Option<Box<Stmt>>, token:Token}, // Name, condition, methods, effects
+    Method{
+        parent_task:Rc<String>,
+        name:Rc<String>, 
+        preconditions:Option<Rc<Expr>>, 
+        cost:Option<Expr>, 
+        body:Box<Stmt>, 
+        token:Token
+    }, 
+    Task{
+        name:Rc<String>, 
+        preconditions:Option<Rc<Expr>>, 
+        cost: Option<Expr>,
+        body:Box<Stmt>, 
+        effects:Option<Box<Stmt>>, 
+        token:Token
+    }, 
     Block(Vec<Stmt>),
     Expression(Expr)
 }
@@ -458,12 +480,12 @@ impl std::fmt::Display for StmtFormatter<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let new_depth = self.depth + 2;
         match self.stmt {
-            Stmt::Method{ name, preconditions:Some(preconditions), body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}):{}", self.stmt.line_no(), ' ', token, name, preconditions, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
-            Stmt::Method{ name, preconditions:None, body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}:{}", self.stmt.line_no(), ' ', token, name, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
-            Stmt::Task{ name, preconditions:Some(preconditions), body, effects:None, token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}):{}", self.stmt.line_no(), ' ',token, name, preconditions, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
-            Stmt::Task{ name, preconditions:None, body, effects:None, token } => write!(f, "{:>lc$}: {:>depth$}{} {}:{}", self.stmt.line_no(), ' ',token, name, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
-            Stmt::Task{ name, preconditions:Some(preconditions), body, effects:Some(effects), token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}):{}{:>lc$}: {:>depth$}EFFECTS:{}", self.stmt.line_no(), ' ',token, name, preconditions, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, effects.line_no(), ' ', StmtFormatter{depth:new_depth, stmt:effects, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
-            Stmt::Task{ name, preconditions:None, body, effects:Some(effects), token } => write!(f, "{:>lc$}: {:>depth$}{} {}:{}{:>lc$}: {:>depth$}EFFECTS:{}", self.stmt.line_no(), ' ',token, name, StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, effects.line_no(), ' ', StmtFormatter{depth:new_depth, stmt:effects, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Method{ parent_task, name, preconditions:Some(preconditions), cost, body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}.{}({}) cost {}:{}", self.stmt.line_no(), ' ', token, parent_task, name, preconditions, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Method{ parent_task, name, preconditions:None, cost, body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}.{} cost {}:{}", self.stmt.line_no(), ' ', token, parent_task, name, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Task{ name, preconditions:Some(preconditions), cost, body, effects:None, token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}) cost {}:{}", self.stmt.line_no(), ' ',token, name, preconditions, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Task{ name, preconditions:None, cost, body, effects:None, token } => write!(f, "{:>lc$}: {:>depth$}{} {} cost {}:{}", self.stmt.line_no(), ' ',token, name, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Task{ name, preconditions:Some(preconditions), cost, body, effects:Some(effects), token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}) cost {}:{}{:>lc$}: {:>depth$}EFFECTS:{}", self.stmt.line_no(), ' ',token, name, preconditions, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, effects.line_no(), ' ', StmtFormatter{depth:new_depth, stmt:effects, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Task{ name, preconditions:None, cost, body, effects:Some(effects), token } => write!(f, "{:>lc$}: {:>depth$}{} {} cost {}:{}{:>lc$}: {:>depth$}EFFECTS:{}", self.stmt.line_no(), ' ',token, name, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, effects.line_no(), ' ', StmtFormatter{depth:new_depth, stmt:effects, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
             Stmt::Block(blk) => {
                 
                 write!(f, "\n")?;
@@ -506,6 +528,16 @@ impl Stmt {
         match self {
             Self::Method{name, ..} |
             Self::Task{name, ..} => Ok(name.clone()),
+            _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
+        }
+    }
+
+    pub fn cost(&self) -> Result<Option<i32>, Error> {
+        match self {
+            Self::Method{cost:Some(cost),..} | 
+            Self::Task{cost:Some(cost),..} => Ok(Some(cost.eval(&HashMap::new())?)),
+            Self::Method{cost:None,..} | 
+            Self::Task{cost:None,..} => Ok(None),
             _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
         }
     }
@@ -574,7 +606,7 @@ impl Stmt {
     pub fn preconditions(&self) -> Result<Option<Rc<Expr>>, Error> {
         match self {
             Self::Method{preconditions, ..} |
-            Self::Task{preconditions, ..} => Ok(preconditions.to_owned()),
+            Self::Task{preconditions, ..} => Ok(preconditions.clone()),
             _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
         }
     }
@@ -788,7 +820,7 @@ impl Parser {
     }
 
     fn effects_statement(&mut self) -> Result<Stmt, Error> {
-        pexpect_prevtoken!(self, TokenData::COLON, {self.statement()}, "Expected ':' after 'effects'.")
+        pexpect_prevtoken!(self, TokenData::COLON, {self.statement(&None)}, "Expected ':' after 'effects'.")
     }
     fn task_statement(&mut self) -> Result<Stmt, Error> {
         let token_id = self.idx-1;
@@ -799,11 +831,15 @@ impl Parser {
                 preconditions = Some(Rc::new(self.expression()?));
                 pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after task conditions.")?
             });
+            let mut cost = None;
+            pmatch!(self, TokenData::COST, {
+                cost = Some(self.expression()?);
+            });
             pexpect_prevtoken!(self, TokenData::COLON, {
-                let body = Box::new(self.statement()?);
+                let body = Box::new(self.statement(&Some(name.clone()))?);
                 let mut effects = None;
                 pmatch!(self, TokenData::EFFECTS, {effects = Some(Box::new(self.effects_statement()?));});
-                Ok(Stmt::Task{name, preconditions, body, effects, token:self.tokens[token_id].clone()})
+                Ok(Stmt::Task{name, preconditions, cost, body, effects, token:self.tokens[token_id].clone()})
             }, "Expected ':' after task label.")
         }, "Expected label after 'task'.")
         
@@ -815,10 +851,10 @@ impl Parser {
             {Ok(Stmt::Expression(expr))}, 
             "Expected new line after expression.")
     }
-    fn block_statement(&mut self) -> Result<Stmt, Error> {
+    fn block_statement(&mut self, parent_task:&Option<Rc<String>>) -> Result<Stmt, Error> {
         let mut stmts = Vec::<Stmt>::new();
         loop {
-            let mut stmt = self.statement()?;
+            let mut stmt = self.statement(parent_task)?;
             if let Stmt::Block(ref mut inner) = stmt {
                 stmts.append(inner);
             } else {
@@ -832,8 +868,9 @@ impl Parser {
         }
         
     }
-    fn method_statement(&mut self) -> Result<Stmt, Error> {
+    fn method_statement(&mut self, parent_task:&Option<Rc<String>>) -> Result<Stmt, Error> {
         let token_id = self.idx-1;
+        let parent_task = parent_task.as_ref().map(|p| p.clone()).unwrap();
         pexpect!(self, TokenData::LABEL(name), {
             let name = Rc::new(name.clone());
             let mut preconditions: Option<Rc<Expr>> = None;
@@ -841,14 +878,22 @@ impl Parser {
                 preconditions = Some(Rc::new(self.expression()?));
                 pexpect!(self, TokenData::CLOSE_PAREN, {Ok(())}, "Expected ')' after method conditions.'")?;
             });
+            let mut cost = None;
+            pmatch!(self, TokenData::COST, {
+                cost = Some(self.expression()?);
+            });
             pexpect_prevtoken!(self, TokenData::COLON, {
-                let parent_statemet = Stmt::Method{name:name.clone(), preconditions:preconditions.to_owned(), body:Box::new(self.statement()?), token:self.tokens[token_id].clone()};
+                let parent_statemet = Stmt::Method{parent_task:parent_task.clone(), name:name.clone(), preconditions:preconditions.as_ref().and_then(|p| Some(p.clone())), cost, body:Box::new(self.statement(&None)?), token:self.tokens[token_id].clone()};
                 if preconditions.is_some() {
                     ptest!(self, TokenData::ELSE, {
+                        let mut elsecost = None;
+                        pmatch!(self, TokenData::COST, {
+                            elsecost = Some(self.expression()?);
+                        });
                         let token_id = self.idx-1;
                         pexpect!(self, TokenData::COLON, {
-                            let else_conditions = Expr::Unary(Token{line:self.tokens[token_id].line, col:self.tokens[token_id].col, len:0, t:TokenData::NOT}, Box::new(preconditions.unwrap().as_ref().clone()));
-                            let else_statement = Stmt::Method{name:Rc::new(format!("Dont{}", name)), preconditions:Some(Rc::new(else_conditions)), body:Box::new(self.statement()?), token:self.tokens[token_id].clone()};
+                            let else_conditions = Expr::Unary(Token{line:self.tokens[token_id].line, col:self.tokens[token_id].col, len:0, t:TokenData::NOT}, Box::new(preconditions.unwrap().deref().clone()));
+                            let else_statement = Stmt::Method{parent_task, name:Rc::new(format!("Dont{}", name)), preconditions:Some(Rc::new(else_conditions)), cost:elsecost, body:Box::new(self.statement(&None)?), token:self.tokens[token_id].clone()};
                             Ok(Stmt::Block(vec![parent_statemet, else_statement]))
                         }, "Expected ':' after else clause.")
                     } else {
@@ -860,17 +905,17 @@ impl Parser {
             }, "Expected ':' after method declaration.")
         }, "Expected method name.")
     }
-    fn statement(&mut self) -> Result<Stmt, Error> {
+    fn statement(&mut self, parent:&Option<Rc<String>>) -> Result<Stmt, Error> {
         // println!("When Parsing a new statement, next token is {}.", self.tokens[self.idx]);
         let r = if let TokenData::TASK = self.tokens[self.idx].t {
             self.idx += 1;
             self.task_statement()
         } else if let TokenData::BLOCK_START = self.tokens[self.idx].t {
             self.idx += 1;
-            self.block_statement()
+            self.block_statement(parent)
         } else if let TokenData::METHOD = self.tokens[self.idx].t {
             self.idx += 1;
-            self.method_statement()
+            self.method_statement(parent)
         } else if let TokenData::EOF = self.tokens[self.idx].t {
             let line = self.tokens[self.idx].line;
             let col = self.tokens[self.idx].col;
@@ -925,7 +970,7 @@ impl Parser {
         };
         // Parser::print_tokens(&parser.tokens);
         while parser.idx + 1 < parser.tokens.len() {
-            match parser.statement() {
+            match parser.statement(&None) {
                 Err(e) => {errors.push(e); parser.error_recover(); },
                 Ok(s) => ast.push(s)
             }
