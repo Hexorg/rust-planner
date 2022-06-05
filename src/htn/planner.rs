@@ -382,7 +382,6 @@ impl Planner{
                     }
                     // ready to run method
                     self.plan.push(PlannedTask::from(method));
-                    self.plan.last_mut().unwrap().name = Rc::new(format!("{}.{}", task.name()?, method.name()?));
                     self.plan.last_mut().unwrap().cost = cost;
                     method.for_each_operator(&mut |op| {
                         if let Some(subtask) = domain.get_task(&op.get_call_target().unwrap()) {

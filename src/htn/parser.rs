@@ -451,7 +451,6 @@ impl Expr {
 #[derive(Clone)]
 pub enum Stmt {
     Method{
-        parent_task:Rc<String>,
         name:Rc<String>, 
         preconditions:Option<Rc<Expr>>, 
         cost:Option<Expr>, 
@@ -480,8 +479,8 @@ impl std::fmt::Display for StmtFormatter<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let new_depth = self.depth + 2;
         match self.stmt {
-            Stmt::Method{ parent_task, name, preconditions:Some(preconditions), cost, body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}.{}({}) cost {}:{}", self.stmt.line_no(), ' ', token, parent_task, name, preconditions, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
-            Stmt::Method{ parent_task, name, preconditions:None, cost, body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}.{} cost {}:{}", self.stmt.line_no(), ' ', token, parent_task, name, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Method{ name, preconditions:Some(preconditions), cost, body, token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}) cost {}:{}", self.stmt.line_no(), ' ', token, name, preconditions, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
+            Stmt::Method{ name, preconditions:None, cost, body, token } => write!(f, "{:>lc$}: {:>depth$}{} {} cost {}:{}", self.stmt.line_no(), ' ', token, name, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
             Stmt::Task{ name, preconditions:Some(preconditions), cost, body, effects:None, token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}) cost {}:{}", self.stmt.line_no(), ' ',token, name, preconditions, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
             Stmt::Task{ name, preconditions:None, cost, body, effects:None, token } => write!(f, "{:>lc$}: {:>depth$}{} {} cost {}:{}", self.stmt.line_no(), ' ',token, name, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
             Stmt::Task{ name, preconditions:Some(preconditions), cost, body, effects:Some(effects), token } => write!(f, "{:>lc$}: {:>depth$}{} {}({}) cost {}:{}{:>lc$}: {:>depth$}EFFECTS:{}", self.stmt.line_no(), ' ',token, name, preconditions, cost.as_ref().unwrap_or(&Expr::Noop(token.clone())), StmtFormatter{depth:new_depth, stmt:body, max_line_count:self.max_line_count}, effects.line_no(), ' ', StmtFormatter{depth:new_depth, stmt:effects, max_line_count:self.max_line_count}, depth=self.depth, lc=self.max_line_count),
@@ -872,7 +871,8 @@ impl Parser {
         let token_id = self.idx-1;
         let parent_task = parent_task.as_ref().map(|p| p.clone()).unwrap();
         pexpect!(self, TokenData::LABEL(name), {
-            let name = Rc::new(name.clone());
+            let name = name.clone();
+            let method_name = Rc::new(format!("{}.{}", parent_task, name));
             let mut preconditions: Option<Rc<Expr>> = None;
             pmatch!(self, TokenData::OPEN_PAREN, {
                 preconditions = Some(Rc::new(self.expression()?));
@@ -883,7 +883,7 @@ impl Parser {
                 cost = Some(self.expression()?);
             });
             pexpect_prevtoken!(self, TokenData::COLON, {
-                let parent_statemet = Stmt::Method{parent_task:parent_task.clone(), name:name.clone(), preconditions:preconditions.as_ref().and_then(|p| Some(p.clone())), cost, body:Box::new(self.statement(&None)?), token:self.tokens[token_id].clone()};
+                let parent_statemet = Stmt::Method{name:method_name, preconditions:preconditions.as_ref().and_then(|p| Some(p.clone())), cost, body:Box::new(self.statement(&None)?), token:self.tokens[token_id].clone()};
                 if preconditions.is_some() {
                     ptest!(self, TokenData::ELSE, {
                         let mut elsecost = None;
@@ -893,7 +893,7 @@ impl Parser {
                         let token_id = self.idx-1;
                         pexpect!(self, TokenData::COLON, {
                             let else_conditions = Expr::Unary(Token{line:self.tokens[token_id].line, col:self.tokens[token_id].col, len:0, t:TokenData::NOT}, Box::new(preconditions.unwrap().deref().clone()));
-                            let else_statement = Stmt::Method{parent_task, name:Rc::new(format!("Dont{}", name)), preconditions:Some(Rc::new(else_conditions)), cost:elsecost, body:Box::new(self.statement(&None)?), token:self.tokens[token_id].clone()};
+                            let else_statement = Stmt::Method{name:Rc::new(format!("{}.Dont{}", parent_task, name)), preconditions:Some(Rc::new(else_conditions)), cost:elsecost, body:Box::new(self.statement(&None)?), token:self.tokens[token_id].clone()};
                             Ok(Stmt::Block(vec![parent_statemet, else_statement]))
                         }, "Expected ':' after else clause.")
                     } else {
