@@ -301,7 +301,7 @@ impl Lexer {
         Ok(r)
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Expr {
     Binary(Box<Expr>, Token, Box<Expr>), // left Token right
     Grouping(Box<Expr>, Token), // e.g. '(' expression ')'
@@ -324,8 +324,30 @@ impl std::fmt::Display for Expr {
             Self::Assignment(val, right, _) => write!(f, "{} = {}", val, right),
             Self::Call(func, _, args) => {
                 write!(f, "{}(", func)?; 
-                args.iter().take(1).try_for_each(|expr| write!(f, "{}", expr))?;
-                args.iter().skip(1).try_for_each(|expr| write!(f, ", {}", expr))?; 
+                let mut i = args.iter();
+                i.by_ref().take(1).try_for_each(|expr| write!(f, "{}", expr))?;
+                i.try_for_each(|expr| write!(f, ", {}", expr))?; 
+                write!(f, ")")
+            },
+            Self::Noop(_) => write!(f, "nop"),
+        }
+    }
+}
+
+impl std::fmt::Debug for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Binary(left, op, right) => write!(f, "({:?}){}({:?})", left, op, right),
+            Self::Grouping(g, _) => write!(f, "({:?})", g),
+            Self::Literal(val, _) => write!(f, ">{}<", val),
+            Self::Variable(var, _) => write!(f, "var_{}", var),
+            Self::Unary(op, right) => write!(f, "{}({:?})", op, right),
+            Self::Assignment(val, right, _) => write!(f, "{} = {:?}", val, right),
+            Self::Call(func, _, args) => {
+                write!(f, "{}(", func)?; 
+                let mut i = args.iter();
+                i.by_ref().take(1).try_for_each(|expr| write!(f, "{:?}", expr))?;
+                i.try_for_each(|expr| write!(f, ", {:?}", expr))?; 
                 write!(f, ")")
             },
             Self::Noop(_) => write!(f, "nop"),
@@ -755,7 +777,7 @@ impl Parser {
     }
     fn factor(&mut self) -> Result<Expr, Error> {
         let mut expr = self.unary()?;
-        while let TokenData::SLASH | TokenData::STAR | TokenData::AND = self.tokens[self.idx].t {
+        while let TokenData::SLASH | TokenData::STAR  = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.unary()?;
@@ -765,7 +787,7 @@ impl Parser {
     }
     fn term(&mut self) -> Result<Expr, Error> {
         let mut expr = self.factor()?;
-        while let TokenData::MINUS | TokenData::PLUS | TokenData::OR = self.tokens[self.idx].t {
+        while let TokenData::MINUS | TokenData::PLUS  = self.tokens[self.idx].t {
             let operator = self.tokens[self.idx].clone();
             self.idx += 1;
             let right = self.factor()?;
@@ -793,8 +815,18 @@ impl Parser {
         }
         Ok(expr)
     }
+    fn logic(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.equality()?;
+        while let TokenData::OR | TokenData::AND = self.tokens[self.idx].t {
+            let operator = self.tokens[self.idx].clone();
+            self.idx += 1;
+            let right = self.equality()?;
+            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
+        }
+        Ok(expr)
+    }
     fn assignment(&mut self) -> Result<Expr, Error> {
-        let target = self.equality()?;
+        let target = self.logic()?;
         ptest!(self, (TokenData::EQUALS 
             | TokenData::ADD_TO 
             | TokenData::SUBTRACT_FROM

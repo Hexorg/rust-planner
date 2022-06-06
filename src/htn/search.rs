@@ -66,48 +66,44 @@ impl std::cmp::Eq for StateAndPath { }
         openSet.push(start.clone(), Reverse(currentCost));
         let mut is_first_run = false;
         let all_tasks:Vec<Rc<String>> = domain.get_all_task_names().iter().filter(|p| p.as_str() != start.method_name.as_str()).map(|k| k.clone()).collect();
-        while openSet.len() > 0 {
-            if let Some((current, _)) = openSet.pop() {
-                if goal.are_preconditions_satisfied(&current.state.0).unwrap() == 1 {
-                    // println!("goal preconditions are now satisfied with {:?}", current.state.0);
-                    // println!("came from:");
-                    // cameFrom.iter().for_each(|(k, v)| println!("From {} to {}", k, v.method_name));
-                    return Some(reconstruct_path(cameFrom, current));
-                }
-                // println!("Getting neighbors of {}", current.last_task_name);
-                let neighbors = &all_tasks;
-                // println!("Looking at state that resulted from calling {}: {:?}", current.method_name, current.state);
-                for task_name in neighbors {
-                    // println!("Can we run {}? ", task_name);
-                    let (task, cost) = domain.get_task_and_cost(task_name).unwrap();
-                    if task.are_preconditions_satisfied(&current.state.0).unwrap() == 1 {
-                        // println!("conditions are satisfied");
-                        let tentative_gScore = if let Some(score) = gScore.get(&current.method_name) {
-                            score + cost
-                        } else {
-                            99999
-                        };
-                        let mut new_state = current.clone();
-                        new_state.cost = tentative_gScore;
-                        task.effect(&mut new_state.state);
-                        new_state.method_name = task_name.clone();
-                        if !gScore.contains_key(&new_state.method_name) || tentative_gScore < gScore[&new_state.method_name] {
-                            cameFrom.insert(new_state.method_name.clone(), current.clone());
-                            // println!("Adding hop from {} to {}", new_state.method_name.clone(), current.method_name.clone());
-                            gScore.insert(new_state.method_name.clone(), tentative_gScore);
-                            currentCost = tentative_gScore+heuristic(&new_state);
-                            if !fScore.contains_key(&new_state.method_name) {
-                                openSet.push(new_state.clone(), Reverse(currentCost));
-                            }
-                            fScore.insert(new_state.method_name, currentCost);
-                        }
+        while let Some((current, _)) = openSet.pop() {
+            // println!("Looking at state that resulted from calling {}: {:?}", current.method_name, current.state);
+            if goal.are_preconditions_satisfied(&current.state.0).unwrap() == 1 {
+                // println!("goal preconditions are now satisfied with {:?}", current.state.0);
+                // println!("came from:");
+                // cameFrom.iter().for_each(|(k, v)| println!("From {} to {}", k, v.method_name));
+                return Some(reconstruct_path(cameFrom, current));
+            }
+            // println!("Getting neighbors of {}", current.method_name);
+            let neighbors = &all_tasks;
+            for task_name in neighbors {
+                // println!("Can we run {}? ", task_name);
+                let (task, cost) = domain.get_task_and_cost(task_name).unwrap();
+                if task.are_preconditions_satisfied(&current.state.0).unwrap() == 1 {
+                    // println!("conditions are satisfied");
+                    let tentative_gScore = if let Some(score) = gScore.get(&current.method_name) {
+                        score + cost
                     } else {
-                        // println!("conditions are NOT satisfied");
+                        99999
+                    };
+                    let mut new_state = current.clone();
+                    new_state.cost = tentative_gScore;
+                    task.effect(&mut new_state.state);
+                    new_state.method_name = task_name.clone();
+                    if !gScore.contains_key(&new_state.method_name) || tentative_gScore < gScore[&new_state.method_name] {
+                        cameFrom.insert(new_state.method_name.clone(), current.clone());
+                        // println!("Adding hop from {} to {}", new_state.method_name.clone(), current.method_name.clone());
+                        gScore.insert(new_state.method_name.clone(), tentative_gScore);
+                        currentCost = tentative_gScore+heuristic(&new_state);
+                        if !fScore.contains_key(&new_state.method_name) {
+                            // println!("New task {} gets us closer to the goal", task.name().unwrap());
+                            openSet.push(new_state.clone(), Reverse(currentCost));
+                        }
+                        fScore.insert(new_state.method_name, currentCost);
                     }
+                } else {
+                    // println!("conditions are NOT satisfied");
                 }
-            } else {
-                // Open set is empty but goal was never reached
-                return None;
             }
         }
         return None;
