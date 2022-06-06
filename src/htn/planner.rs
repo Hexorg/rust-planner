@@ -54,6 +54,7 @@ impl std::fmt::Debug for PlanStep {
 pub struct PlannedTask {
     pub preconditions: Option<Rc<Expr>>,
     pub name: Rc<String>,
+    pub cost: i32,
     pub operators: Vec<PlanStep>,
     pub end_state: State,
 }
@@ -99,9 +100,10 @@ impl From<&Stmt> for PlannedTask {
     fn from(stmt: &Stmt) -> Self {
         let preconditions = stmt.preconditions().unwrap();
         let name = stmt.name().unwrap();
+        let cost = stmt.cost().unwrap().unwrap_or(1);
         let operators = Vec::new();
         let end_state = State(HashMap::new());
-        PlannedTask{preconditions, name, operators, end_state}
+        PlannedTask{preconditions, cost, name, operators, end_state}
     }
 }
 
@@ -368,9 +370,9 @@ impl Planner{
                     }
                     Ok(())
                 })?;
-                if let Some((MethodPlan{plan, method}, cost)) = method_plans.pop() {
+                if let Some((MethodPlan{plan, method}, _cost)) = method_plans.pop() {
                     // Cheapest cost is to run this method
-                    // println!("\tRunning method {}.{} (plan len = {})", task.name()?, method.name()?, plan.len());
+                    // println!("\tRunning method {} plan:{}", method.name()?, plan);
                     for subtask in plan {
                         // println!("\t\tRunning method's {}.{} planned subtask {}", task.name()?, method.name()?, subtask.name);
                         if !self.run_astar_only(state, domain.get_task(&subtask.name).unwrap(), domain)? {
@@ -379,7 +381,7 @@ impl Planner{
                     }
                     // ready to run method
                     self.plan.push(PlannedTask::from(method));
-                    self.plan.last_mut().unwrap().cost = cost;
+                    self.plan.last_mut().unwrap().cost = domain.get_cost(&task.name()?).unwrap();
                     method.for_each_operator(&mut |op:&Expr| {
                         if !op.is_nop() {
                             if let Some(subtask) = domain.get_task(&op.get_call_target().unwrap()) {

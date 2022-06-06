@@ -20,8 +20,8 @@ fn main() {
     state.0.insert(Rc::new(String::from("carryFood")), 0);
     state.0.insert(Rc::new(String::from("at")), 0);
 
-    domain.set_cost(&Rc::new(String::from("GotoRestaurant")), 20);
-    domain.set_cost(&Rc::new(String::from("Forage")), 3);
+    domain.set_cost(&Rc::new(String::from("GotoRestaurant")), 2);
+    domain.set_cost(&Rc::new(String::from("Forage")), 1);
     match planner.plan(&state, &domain) {
         Ok(true) => println!("Planer finished successfully."),
         Ok(false) => println!("Planer was not able to find full solution - the plan is partial."),

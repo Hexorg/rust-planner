@@ -1,5 +1,5 @@
 task Main:
-	method Eat(hunger>5) cost 50:
+	method Eat(hunger>5):
 		Eat()
 	method Work(have_supply_need):
 		target = find_supply_need()
@@ -15,14 +15,14 @@ task Eat(carryFood):
 effects:
 	carryFood = false
 
-task Forage(!carryFood) cost 5:
+task Forage(!carryFood) cost 60:
 	goto(berries)
 	target = chooseFood()
 	pickup(target)
 effects:
 	carryFood = true
 
-task GotoRestaurant(at != 1):
+task GotoRestaurant(at != 1) cost 2:
 	goto(restaurant)
 effects:
 	at = 1
