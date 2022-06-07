@@ -2,11 +2,10 @@ use std::{fs, fmt::Debug,  collections::HashMap, rc::Rc, ops::Deref};
 use super::parser::{Parser, Stmt, StmtFormatter};
 use super::parser;
 
+/// Structure that holds parsed out AST as well as optimization data
 pub struct Domain {
     pub tasks: Vec<Stmt>,
     task_ids: HashMap<Rc<String>, usize>,
-    pub neighbors: HashMap<Rc<String>, Vec<Rc<String>>>,
-    pub task_cost: Vec<i32>,
     main_idx: usize,
     pub filepath: String,
     pub content: String,
@@ -28,6 +27,8 @@ impl std::fmt::Display for Error {
     }
 }
 
+
+impl std::error::Error for Error { }
 
 impl From<std::io::Error> for Error {
     fn from(arg: std::io::Error) -> Self {
@@ -124,31 +125,6 @@ impl Domain {
         }
     }
 
-    pub fn get_cost(&self, name:&Rc<String>) -> Option<i32> {
-        if let Some(idx) = self.task_ids.get(name) {
-            let stmt = self.tasks.get(*idx).unwrap();
-            let cost = stmt.cost().unwrap().unwrap_or(1) * self.task_cost.get(*idx).unwrap_or(&1);
-            Some(cost)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_task_and_cost(&self, name:&Rc<String>) -> Option<(&Stmt, i32)> {
-        if let Some(idx) = self.task_ids.get(name) {
-            let stmt = self.tasks.get(*idx).unwrap();
-            let cost = stmt.cost().unwrap().unwrap_or(1) * self.task_cost.get(*idx).unwrap_or(&1);
-            return Some((stmt, cost))
-        } else {
-            None
-        }
-    }
-
-    pub fn set_cost(&mut self, name:&Rc<String>, cost:i32) {
-        if let Some(idx) = self.task_ids.get(name) {
-            self.task_cost[*idx] = cost;
-        }
-    }
 
     pub fn get_main(&self) -> &Stmt {
         self.tasks.get(self.main_idx).unwrap()
@@ -164,7 +140,6 @@ impl Domain {
         let tasks = Parser::parse(content.as_str())?;
         // errors.iter().for_each(|e| Parser::print_parse_errors(e, content.as_str(), filepath));
         let mut task_ids = HashMap::new();
-        let mut task_cost = Vec::new();
         let mut main_idx = None;
         for (idx, stmt) in tasks.iter().enumerate() {
             let name = stmt.name()?;
@@ -172,12 +147,10 @@ impl Domain {
                 main_idx = Some(idx);
             }
             task_ids.insert(name.clone(), idx);
-            task_cost.push(stmt.cost()?.unwrap_or(1));
             
         }
     
-        let neighbors = HashMap::new(); //Domain::create_links(&tasks);
-        let domain = Domain{tasks, task_cost, task_ids, main_idx:main_idx.expect("Domain must contain 'Main' task"), neighbors, content, filepath:String::from(filepath)};
+        let domain = Domain{tasks,  task_ids, main_idx:main_idx.expect("Domain must contain 'Main' task"),  content, filepath:String::from(filepath)};
         Ok(domain)
     }
 }

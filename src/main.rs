@@ -1,35 +1,31 @@
 mod htn;
-use std::collections::HashMap;
 use std::rc::Rc;
 
-use htn::domain::{Domain};
-use htn::planner::{Planner};
-use htn::planner::State;
+// use htn::parser::Literal;
+use htn::domain::Domain;
+use htn::planner::Planner;
+use htn::interpreter::State;
 
 fn main() {
-    let mut domain = match Domain::from_file("htn-problems/Supplier.htn") {
+    let domain = match Domain::from_file("htn-problems/Supplier.htn") {
         Ok(domain) => domain,
         Err(e) => {eprintln!("{}", e); panic!()},
     };
 
     print!("{:?}", domain);
-    let mut planner = Planner::new();
-    let mut state = State(HashMap::new());
-    state.0.insert(Rc::new(String::from("hunger")), 6);
-    state.0.insert(Rc::new(String::from("have_supply_need")), 0);
-    state.0.insert(Rc::new(String::from("carryFood")), 0);
-    state.0.insert(Rc::new(String::from("rHasFood")), 0);
-    state.0.insert(Rc::new(String::from("at")), 0);
+    let planner = Planner::new(domain);
+    let mut state = State::new();
+    state.0.insert(Rc::new(String::from("hunger")), 6 as i32);
+    state.0.insert(Rc::new(String::from("have_supply_need")), 0 as i32);
+    state.0.insert(Rc::new(String::from("carryFood")), 0 as i32);
+    state.0.insert(Rc::new(String::from("rHasFood")), 0 as i32);
+    state.0.insert(Rc::new(String::from("at")), 0 as i32);
 
-    domain.set_cost(&Rc::new(String::from("GotoRestaurant")), 2);
-    domain.set_cost(&Rc::new(String::from("Forage")), 1);
 
-    match planner.plan(&state, &domain) {
-        Ok(true) => println!("Planer finished successfully."),
-        Ok(false) => println!("Planer was not able to find full solution - the plan is partial."),
-        Err(e) => domain.print_parse_error(&e),
-    }
-    println!("{}", planner.plan);
+    let plan = planner.plan(&state).unwrap();
+    println!("Planer finished successfully. Plan: {:?}", plan);
+
+
     // for action in planner.plan {
     //     match action.preconditions {
     //         Some(p) => print!("if {} then ", p),

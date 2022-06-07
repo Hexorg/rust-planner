@@ -1,6 +1,6 @@
 pub mod htn;
-use htn::{domain::Domain, planner::{Planner, State}};
-use std::{os::raw::{c_char, c_int}, ffi::{CStr, CString}, mem};
+use htn::*;
+
 
 // #[no_mangle]
 // pub unsafe extern "C" fn load_domain(filepath: *const c_char) -> Box<Domain> {
