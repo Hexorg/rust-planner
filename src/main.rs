@@ -4,22 +4,25 @@ use std::rc::Rc;
 // use htn::parser::Literal;
 use htn::domain::Domain;
 use htn::planner::Planner;
-use htn::interpreter::State;
+use htn::interpreter::{State, StateType};
+
 
 fn main() {
     let domain = match Domain::from_file("htn-problems/Supplier.htn") {
         Ok(domain) => domain,
         Err(e) => {eprintln!("{}", e); panic!()},
     };
-
     print!("{:?}", domain);
     let planner = Planner::new(domain);
-    let mut state = State::new();
-    state.0.insert(Rc::new(String::from("hunger")), 6 as i32);
-    state.0.insert(Rc::new(String::from("have_supply_need")), 0 as i32);
-    state.0.insert(Rc::new(String::from("carryFood")), 0 as i32);
-    state.0.insert(Rc::new(String::from("rHasFood")), 1 as i32);
-    state.0.insert(Rc::new(String::from("at")), 0 as i32);
+    let vid = &planner.domain.variable_ids;
+    println!("Variable map: {:?}", vid);
+    let state_size = planner.domain.variable_ids.len();
+    let mut state = State::new(state_size);
+    state.set(*vid.get("hunger").unwrap(), 6 as i32);
+    state.0.insert(*vid.get("have_supply_need").unwrap(), 0 as i32);
+    state.0.insert(*vid.get("carryFood").unwrap(), 0 as i32);
+    state.0.insert(*vid.get("rHasFood").unwrap(), 1 as i32);
+    state.0.insert(*vid.get("at").unwrap(), 0 as i32);
 
 
     let plan = planner.plan(&state).unwrap();

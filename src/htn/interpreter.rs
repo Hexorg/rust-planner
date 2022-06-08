@@ -1,59 +1,28 @@
-use std::{collections::HashMap, rc::Rc};
+
+use crate::htn::parser::LabelToken;
+
 use super::parser::{self, Expr, Error, TokenData};
 
-#[derive(Clone, Debug)]
-pub struct State<T: std::hash::Hash>(pub HashMap<Rc<String>, T>);
-
-impl<T> std::hash::Hash for State<T> where T:std::hash::Hash {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.iter().for_each(|(key, val)| {key.hash(state); val.hash(state);})
-    }
-}
-impl<T> std::cmp::PartialEq for State<T>  where T:std::hash::Hash + std::cmp::PartialEq + std::fmt::Debug {
-    fn eq(&self, other: &Self) -> bool {
-        let mut result = true;
-        self.0.iter().fold(&mut result, |acc, (k, v)| {*acc &=  other.0.contains_key(k) && other.0[k] == *v; acc});
-        // println!("\tCMP: {:?} == {:?} ? {}", self.0, other.0, result);
-        result
-    }
-}
-impl<T> std::cmp::Eq for State<T> where T:std::hash::Hash + std::cmp::PartialEq + std::fmt::Debug { }
+#[derive(Clone, Debug, std::hash::Hash, std::cmp::PartialEq, std::cmp::PartialOrd, std::cmp::Eq, std::cmp::Ord)]
+pub struct State<T>(pub Vec<T>);
 
 
-trait AsRC { fn asRC(&self) -> Rc<String>; }
-impl AsRC for Rc<String> {
-    fn asRC(&self) -> Rc<String> {
-        return self.clone()
-    }
-}
-impl AsRC for String {
-    fn asRC(&self) -> Rc<String> {
-        return Rc::new(self.clone())
-    }
-}
-impl AsRC for &str {
-    fn asRC(&self) -> Rc<String> {
-        return Rc::new(String::from(*self))
-    }
-}
-impl<T:std::hash::Hash> State<T> {
-    #[inline]
-    fn get(&self, key:&Rc<String>) -> Option<&T> {
-        self.0.get(key)
+impl<T:Copy + Default> State<T> {
+    pub fn new(capacity:usize) -> Self {
+        Self(vec![T::default(); capacity])
     }
     #[inline]
-    fn insert<V:AsRC>(&mut self, key:V, value:T) -> Option<T>{
-        self.0.insert(key.asRC(), value)
+    pub fn get(&self, key:usize) -> T {
+        self.0[key]
     }
-}
-impl<T:std::hash::Hash> State<T> {
-    pub fn new() -> State<T> {
-        State(HashMap::new())
+    #[inline]
+    pub fn set(&mut self, key:usize, value:T) {
+        self.0[key] = value
     }
 }
 
-pub trait Evaluatable<T> where T: Clone + 
-        std::hash::Hash  + 
+
+pub trait Evaluatable<T> where T: Copy + 
         std::cmp::PartialEq +
         std::cmp::PartialOrd +
         std::ops::Sub<Output = T> + 
@@ -64,15 +33,14 @@ pub trait Evaluatable<T> where T: Clone +
         std::ops::BitAnd<Output = T> + 
         std::ops::Not<Output = T> {
     fn eval(&self, state:&State<T>) -> Result<T, Error> ;
-    fn eval_mut(&self, state:&mut State<T>) -> Result<T, Error>;
+    fn eval_mut(&self, state:&mut State<T>) -> Result<(), Error>;
 }
 
-impl<T> Evaluatable<T> for Expr where T: Clone + 
-        std::hash::Hash + 
+impl<T> Evaluatable<T> for Expr where T: Copy + Default +
         std::cmp::PartialEq +
         std::cmp::PartialOrd +
-        std::convert::From::<parser::Literal> +
-        std::fmt::Display +
+        std::convert::From<bool> + 
+        std::convert::From<parser::Literal> + 
         std::ops::Sub<Output = T> + 
         std::ops::Add<Output = T> + 
         std::ops::Div<Output = T> + 
@@ -87,16 +55,16 @@ impl<T> Evaluatable<T> for Expr where T: Clone +
                 let left = left.eval(state)?;
                 let right = right.eval(state)?;
                 match op.t {
-                    EqualsEquals => Ok(parser::Literal::B(left == right).into()),
+                    EqualsEquals => Ok((left == right).into()),
                     Minus => Ok(left - right),
                     Plus => Ok(left + right),
                     Slash => Ok(left / right),
                     Star => Ok(left * right),
-                    Greater => Ok(parser::Literal::B(left > right).into()),
-                    Smaller => Ok(parser::Literal::B(left < right).into()),
-                    GreaterOrEquals => Ok(parser::Literal::B(left >= right).into()),
-                    SmallerOrEquals => Ok(parser::Literal::B(left <= right).into()),
-                    NotEquals => Ok(parser::Literal::B(left != right).into()),
+                    Greater => Ok((left > right).into()),
+                    Smaller => Ok((left < right).into()),
+                    GreaterOrEquals => Ok((left >= right).into()),
+                    SmallerOrEquals => Ok((left <= right).into()),
+                    NotEquals => Ok((left != right).into()),
                     Or => Ok(left | right),
                     And => Ok(left & right),
                     _ => Err(self.to_err(String::from("Unsupported operation."))),
@@ -104,25 +72,47 @@ impl<T> Evaluatable<T> for Expr where T: Clone +
             },
             Self::Grouping(g, _) => Ok(g.eval(state)?),
             Self::Literal(val, _) => Ok((*val).into()),
-            Self::Variable(var, tok) => if let Some(val) = state.get(var) {
-                Ok(val.clone())
-            } else {
-                Err(self.to_err(format!("Unknown variable name: {}.", var)))
-            },
+            Self::Variable(LabelToken{idx:Some(var),..}) => Ok(state.get(*var)),
+            Self::Variable(LabelToken{idx:None,..}) => Err(self.to_err(String::from("Variable has not been converted to a state index"))),
             Self::Unary(op, right) => if let Not = op.t { Ok(!right.eval(state)?)  } else { 
                 Err(self.to_err(String::from("Unexpected unary operator.")))
             },
-            Expr::Call(_, tok, _) | 
-            Expr::Assignment(_,_,tok) |
-            Expr::Noop(tok) => Err(self.to_err(String::from("Unable to evaluate this expression."))),
-            
+            Self::Call(_, _) | 
+            Self::Assignment(_,_) |
+            Self::Noop(_) => Err(self.to_err(String::from("Unable to evaluate this expression."))),
         }
     }
 
-    fn eval_mut(&self, state:&mut State<T>) -> Result<T, Error> {
+    fn eval_mut(&self, state:&mut State<T>) -> Result<(), Error> {
         match self {
-            Self::Assignment(var, right, _) => {let r = right.eval(state)?; state.insert(var.clone(), r.clone()); Ok(r)},
-            _ => self.eval(state)
+            Self::Assignment(LabelToken{idx:Some(var),..}, right) => {let r = right.eval(state)?; state.set(*var, r); Ok(())},
+            Self::Noop(_) => Ok(()),
+            _ => Err(self.to_err(String::from("This expression is not an assignment.")))
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub enum StateType {
+    I(i32),
+    B(bool),
+    F(f32)
+}
+
+impl std::hash::Hash for StateType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+    }
+}
+
+impl std::fmt::Display for StateType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StateType::I(i) => write!(f, "{}", i),
+            StateType::B(b) => write!(f, "{}", b),
+            StateType::F(d) => write!(f, "{}", d),
+        }
+    }
+}
+
+

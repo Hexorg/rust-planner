@@ -1,4 +1,4 @@
-use std::{fmt, rc::Rc, collections::HashSet, ops::Deref};
+use std::{fmt, rc::Rc, collections::{HashSet, HashMap}, ops::Deref, convert::{TryFrom, TryInto}};
 
 pub struct Error {
     line: usize,
@@ -130,10 +130,36 @@ pub struct Token {
     pub len: usize,
     pub t: TokenData,
 }
+#[derive(Clone)]
+pub struct LabelToken {
+    pub line: usize,
+    pub col: usize,
+    pub len: usize,
+    pub string: String,
+    pub idx: Option<usize>
+}
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.t)
+    }
+}
+
+impl TryFrom<Token> for LabelToken {
+    type Error = self::Error;
+
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        if let TokenData::Label(name) = value.t {
+            Ok(Self{line:value.line, col:value.col, len:value.len, string:name, idx:None})
+        } else {
+            Err(self::Error{line:value.line, col:value.col, message:String::from("Can't convert non-Label Token to LabelToken")})
+        }
+    }
+}
+
+impl fmt::Display for LabelToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.string)
     }
 }
 
@@ -360,15 +386,17 @@ impl Lexer {
         Ok(r)
     }
 }
+
+
 #[derive(Clone)]
 pub enum Expr {
     Binary(Box<Expr>, Token, Box<Expr>), // left Token right
     Grouping(Box<Expr>, Token), // e.g. '(' expression ')'
     Literal(Literal, Token),
-    Variable(Rc<String>, Token),
+    Variable(LabelToken),
     Unary(Token, Box<Expr>), // Token right
-    Assignment(Rc<String>, Box<Expr>, Token), // name, value
-    Call(Rc<String>, Token, Vec<Expr>), // callee, closing parenthesis token, args
+    Assignment(LabelToken, Box<Expr>), // name, value
+    Call(LabelToken, Vec<Expr>), // callee, args
     Noop(Token)
 }
 
@@ -378,10 +406,10 @@ impl std::fmt::Display for Expr {
             Self::Binary(left, op, right) => write!(f, "{} {} {}", left, op, right),
             Self::Grouping(g, _) => write!(f, "({})", g),
             Self::Literal(val, _) => write!(f, "{}", val),
-            Self::Variable(var, _) => write!(f, "{}", var),
+            Self::Variable(var) => write!(f, "{}", var),
             Self::Unary(op, right) => write!(f, "{}{}", op, right),
-            Self::Assignment(val, right, _) => write!(f, "{} = {}", val, right),
-            Self::Call(func, _, args) => {
+            Self::Assignment(val, right) => write!(f, "{} = {}", val, right),
+            Self::Call(func, args) => {
                 write!(f, "{}(", func)?; 
                 let mut i = args.iter();
                 i.by_ref().take(1).try_for_each(|expr| write!(f, "{}", expr))?;
@@ -399,10 +427,10 @@ impl std::fmt::Debug for Expr {
             Self::Binary(left, op, right) => write!(f, "({:?}){}({:?})", left, op, right),
             Self::Grouping(g, _) => write!(f, "({:?})", g),
             Self::Literal(val, _) => write!(f, ">{}<", val),
-            Self::Variable(var, _) => write!(f, "var_{}", var),
+            Self::Variable(var) => write!(f, "var_{}", var),
             Self::Unary(op, right) => write!(f, "{}({:?})", op, right),
-            Self::Assignment(val, right, _) => write!(f, "{} = {:?}", val, right),
-            Self::Call(func, _, args) => {
+            Self::Assignment(val, right) => write!(f, "{} = {:?}", val, right),
+            Self::Call(func, args) => {
                 write!(f, "{}(", func)?; 
                 let mut i = args.iter();
                 i.by_ref().take(1).try_for_each(|expr| write!(f, "{:?}", expr))?;
@@ -416,42 +444,55 @@ impl std::fmt::Debug for Expr {
 
 
 impl Expr {
-    pub fn world_variables(&self) -> HashSet<Rc<String>> {
+    pub fn get_reads(&self) -> HashSet<&str> {
         let mut vars = HashSet::new();
         match self {
-            Self::Binary(left, _, right) => {vars.extend(left.world_variables()); vars.extend(right.world_variables()); },
+            Self::Binary(left, _, right) => {vars.extend(left.get_reads()); vars.extend(right.get_reads()); },
             Self::Grouping(sub, _) |
-            Self::Unary(_, sub) => vars.extend(sub.world_variables()),
-            Self::Assignment(var, sub, _) => {vars.insert(var.clone()); vars.extend(sub.world_variables());},
-            Self::Variable(var, _) => {vars.insert(var.clone());},
+            Self::Unary(_, sub) |
+            Self::Assignment(_, sub)=> vars.extend(sub.get_reads()),
+            Self::Variable(var) => {vars.insert(var.string.as_str());},
             Self::Literal(_, _) |
-            Self::Call(_, _, _) |
+            Self::Call(_, _) |
             Self::Noop(_) => (),
         }
         vars
     }
 
-    pub fn get_assignment_target(&self) -> Option<Rc<String>> {
-        if let Self::Assignment(target, _,_) = self {
-            Some(target.clone())
+    pub fn set_var_ids(&mut self, map: &HashMap<String, usize>) {
+        match self {
+            Self::Binary(left, _, right) => {left.set_var_ids(map); right.set_var_ids(map); },
+            Self::Grouping(sub, _) |
+            Self::Unary(_, sub) => sub.set_var_ids(map),
+            Self::Assignment(var, sub)=> {var.idx = map.get(var.string.as_str()).cloned(); sub.set_var_ids(map)},
+            Self::Variable(var) => var.idx = map.get(var.string.as_str()).cloned(),
+            Self::Literal(_, _) |
+            Self::Call(_, _) |
+            Self::Noop(_) => (),
+        }
+    }
+
+    pub fn get_writes(&self) -> Option<&str> {
+        if let Self::Assignment(target,_) = self {
+            Some(target.string.as_str())
         } else {
             None
         }
     }
 
-    pub fn get_call_target(&self) -> Option<Rc<String>> {
+    pub fn get_call_target(&self) -> Option<&str> {
         match self {
-            Self::Call(target, _,_) => Some(target.clone()),
-            Self::Assignment(_,left,_) => left.get_call_target(),
+            Self::Call(target, _) => Some(target.string.as_str()),
+            Self::Assignment(_,left) => left.get_call_target(),
             _ => None,
         }
     }
 
-    pub fn get_call_arguments(&self) -> Vec<Rc<String>> {
+    pub fn get_call_arguments(&self) -> Vec<&str> {
         let mut result = Vec::new();    
         match self {
-            Self::Call(_,_,arg_vec) => arg_vec.iter().for_each(|e| result.extend(e.world_variables().iter().map(|v| v.clone()))),
-            Self::Assignment(_,left,_) => result.extend(left.get_call_arguments()),
+            Self::Call(_,arg_vec) => arg_vec.iter().for_each(|e| result.extend(e.get_reads().iter().map(|v| v.clone()))),
+            Self::Assignment(_,left) => result.extend(left.get_call_arguments()),
             _ => (),
         }
         result
@@ -469,11 +510,11 @@ impl Expr {
             Self::Binary(_, tok, _) |
             Self::Grouping(_, tok) |
             Self::Literal(_, tok) |
-            Self::Variable(_, tok) |
             Self::Unary(tok, _) |
-            Self::Assignment(_, _, tok) |
-            Self::Call(_, tok, _) |
-            Self::Noop(tok) => Error{line:tok.line, col:tok.col, message:msg}
+            Self::Noop(tok) => Error{line:tok.line, col:tok.col, message:msg},
+            Self::Variable(tok) |
+            Self::Assignment(tok, _) |
+            Self::Call(tok, _) => Error{line:tok.line, col:tok.col, message:msg}
         }
     }
 
@@ -482,31 +523,29 @@ impl Expr {
             Self::Binary(_, tok, _) |
             Self::Grouping(_, tok) |
             Self::Literal(_, tok) |
-            Self::Variable(_, tok) |
             Self::Unary(tok, _) |
-            Self::Assignment(_, _, tok) |
-            Self::Call(_, tok, _) |
-            Self::Noop(tok) => tok.line
+            Self::Noop(tok) => tok.line,
+            Self::Variable(tok) |
+            Self::Assignment(tok, _) |
+            Self::Call(tok, _) => tok.line
         }
     }
 }
 
-#[derive(Clone)]
 pub enum Stmt {
     Method{
-        name:Rc<String>, 
-        preconditions:Option<Rc<Expr>>, 
-        cost:Option<Rc<Expr>>, 
+        name:LabelToken, 
+        preconditions:Option<Expr>, 
+        cost:Option<Expr>, 
         body:Box<Stmt>, 
-        token:Token
+        
     }, 
     Task{
-        name:Rc<String>, 
-        preconditions:Option<Rc<Expr>>, 
-        cost: Option<Rc<Expr>>,
+        name:LabelToken, 
+        preconditions:Option<Expr>, 
+        cost: Option<Expr>,
         body:Box<Stmt>, 
         effects:Option<Box<Stmt>>, 
-        token:Token
     }, 
     Block(Vec<Stmt>),
     Expression(Expr)
@@ -523,10 +562,10 @@ impl std::fmt::Display for StmtFormatter<'_> {
         let new_depth = self.depth + 2;
         
         match self.stmt {
-            Stmt::Task {name, preconditions, cost, body,token, ..} |
-            Stmt::Method {name, preconditions, cost, body, token} => {
+            Stmt::Task {name, preconditions, cost, body, ..} |
+            Stmt::Method {name, preconditions, cost, body,..} => {
                 write!(f, "{:>lc$}: {:>depth$}", self.stmt.line_no(), ' ', depth=self.depth, lc=self.max_line_count)?;
-                write!(f, "{} {}", token, name)?;
+                write!(f, "TASK {}", name.string)?;
                 if let Some(p) = preconditions {
                     write!(f, "({})", p)?;
                 }
@@ -554,9 +593,7 @@ impl std::fmt::Display for StmtFormatter<'_> {
 
 impl std::fmt::Debug for StmtFormatter<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)?;
-        writeln!(f, "Effects: {:?}", self.stmt.affects())?;
-        writeln!(f, "Depends {:?}", self.stmt.depends())
+        write!(f, "{}", self)
     }
 }
 
@@ -577,6 +614,25 @@ impl<'a> Iterator for OperatorIterator<'a> {
        r
     }
 }
+
+// pub struct MutOperatorIterator<'a> {
+//     pos: usize,
+//     statements: &'a mut Vec<Stmt>
+// }
+
+// impl<'a> Iterator for MutOperatorIterator<'a> {
+//     type Item = &'a mut Expr;
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         let buffer = self.statements.as_mut_ptr();
+//         // let r = match  {
+//         //         Some(Stmt::Expression(e)) => Some(e),
+//         //         _ => None,
+//         // };
+//         self.pos += 1;
+//         m
+//     }
+// }
 
 pub struct MethodIterator<'a> {
     pos: usize,
@@ -600,8 +656,8 @@ impl<'a> Iterator for MethodIterator<'a> {
 impl Stmt {
     pub fn to_err(&self, msg:String) -> Error {
         match self {
-            Stmt::Method{token,..} |
-            Stmt::Task{token,..} => Error{line:token.line, col:token.col, message:msg},
+            Stmt::Method{name,..} |
+            Stmt::Task{name,..} => Error{line:name.line, col:name.col, message:msg},
             Stmt::Block(blk) => blk.first().expect("Unable to generate error for empty block.").to_err(msg),
             Stmt::Expression(e) => e.to_err(msg),
         }
@@ -609,48 +665,24 @@ impl Stmt {
 
     pub fn line_no(&self) -> usize {
         match self {
-            Self::Method{token,..} |
-            Self::Task{token,..} => token.line,
+            Self::Method{name,..} |
+            Self::Task{name,..} => name.line,
             Stmt::Block(blk) => blk.first().expect("Unable to get line for empty block").line_no(),
             Stmt::Expression(e) => e.line_no()
         }
     }
-    pub fn name(&self) -> Result<Rc<String>, Error> {
+    pub fn name(&self) -> Result<&str, Error> {
         match self {
             Self::Method{name, ..} |
-            Self::Task{name, ..} => Ok(name.clone()),
+            Self::Task{name, ..} => Ok(name.string.as_str()),
             _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
         }
     }
 
-
-
-    pub fn affects(&self) -> HashSet<Rc<String>> {
-        let mut result = HashSet::new();
-        match self {
-            Self::Task{effects:Some(effects),..} => result.extend(effects.affects()),
-            Self::Block(blk) => blk.iter().for_each(|stmt| result.extend(stmt.affects())),
-            Self::Expression(e) => result.extend(e.world_variables()),
-            Self::Method{..} | Self::Task{..} => (),
-        }
-        result
-    }
-
-    pub fn depends(&self) -> HashSet<Rc<String>> {
-        let mut result = HashSet::new();
-        match self {
-            Stmt::Method{preconditions:Some(preconditions), ..} |
-            Stmt::Task{preconditions:Some(preconditions),..} => result.extend(preconditions.world_variables()),
-            Stmt::Block(blk) => blk.iter().for_each(|stmt| result.extend(stmt.depends())),
-            _ => (),
-        }
-        result
-    }
-
-    pub fn cost(&self) -> Result<Option<Rc<Expr>>, Error> {
+    pub fn cost(&self) -> Result<Option<&Expr>, Error> {
         match self {
             Self::Method{cost:Some(cost),..} | 
-            Self::Task{cost:Some(cost),..} => Ok(Some(cost.clone())),
+            Self::Task{cost:Some(cost),..} => Ok(Some(cost)),
             Self::Method{cost:None,..} | 
             Self::Task{cost:None,..} => Ok(None),
             _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
@@ -669,9 +701,6 @@ impl Stmt {
         }
     }
 
-    
-
-
     /// Will iterate over all expressions in this statement. 
     /// If this is a composite task it'll iterate over all of the methods and their statements too
     pub fn expressions<'a>(&'a self) -> Result<OperatorIterator<'a>, Error> {
@@ -679,6 +708,16 @@ impl Stmt {
             Self::Task{body,..} |
             Self::Method{body,..} => body.expressions(),
             Self::Block(v) =>  Ok(OperatorIterator { pos: 0, statements: v }),
+            //Self::Expression(_) => OperatorIterator { pos: 0, statements: &vec![self.clone()] }
+            _ => Err(self.to_err(String::from("Statement doesn't support expressions.")))
+        }
+    }
+
+    pub fn expressions_mut<'a>(&'a mut self) -> Result<&mut Vec<Stmt>, Error> {
+        match self {
+            Self::Task{body,..} |
+            Self::Method{body,..} => body.expressions_mut(),
+            Self::Block(v) =>   Ok(v),
             //Self::Expression(_) => OperatorIterator { pos: 0, statements: &vec![self.clone()] }
             _ => Err(self.to_err(String::from("Statement doesn't support expressions.")))
         }
@@ -693,17 +732,41 @@ impl Stmt {
         }
     }
 
-    pub fn preconditions(&self) -> Result<Option<Rc<Expr>>, Error> {
+    pub fn methods_mut<'a>(&'a mut self) -> Result<&mut Vec<Stmt>, Error> {
+        match self {
+            Self::Task{body,..} => body.methods_mut(),
+            Self::Block(v) => Ok(v),
+            // Self::Method{..} => Ok(MethodIterator{pos:0, statements: &vec![self.clone()]}),
+            _ => Err(self.to_err(String::from("Expression statement can't have any methods.")))
+        }
+    }
+
+    pub fn preconditions(&self) -> Result<&Option<Expr>, Error> {
         match self {
             Self::Method{preconditions, ..} |
-            Self::Task{preconditions, ..} => Ok(preconditions.clone()),
+            Self::Task{preconditions, ..} => Ok(preconditions),
+            _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
+        }
+    }
+
+    pub fn preconditions_mut(&mut self) -> Result<&mut Option<Expr>, Error> {
+        match self {
+            Self::Method{preconditions, ..} |
+            Self::Task{preconditions, ..} => Ok(preconditions),
             _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
         }
     }
 
     pub fn effects(&self) -> Result<&Option<Box<Stmt>>, Error> {
-        match &self {
-            Self::Task{effects,..} => Ok(effects),
+        match self {
+            Self::Task{ref effects,..} => Ok(effects),
+            _ => Err(self.to_err(String::from("Only tasks have effects")))
+        }
+    }
+
+    pub fn effects_mut(&mut self) -> Result<&mut Option<Box<Stmt>>, Error> {
+        match self {
+            Self::Task{ref mut effects,..} => Ok(effects),
             _ => Err(self.to_err(String::from("Only tasks have effects")))
         }
     }
@@ -782,9 +845,9 @@ impl Parser {
             pexpect!(self, TokenData::CloseParenthesis, {
                 Ok(Expr::Grouping(Box::new(expr), self.tokens[self.idx].clone()))
             }, "Expected ')' after expression.")
-        } else if let TokenData::Label(name) = &self.tokens[self.idx].t {
+        } else if let TokenData::Label(_) = &self.tokens[self.idx].t {
             self.idx += 1;
-            Ok(Expr::Variable(Rc::new(name.clone()), self.tokens[self.idx-1].clone()))
+            Ok(Expr::Variable(self.tokens[self.idx-1].clone().try_into()?))
         } else if let TokenData::Pass = &self.tokens[self.idx].t {
             self.idx += 1;
             Ok(Expr::Noop(self.tokens[self.idx-1].clone()))
@@ -799,8 +862,8 @@ impl Parser {
             let mut args = Vec::<Expr>::new();
             loop { 
                 ptest!(self, TokenData::CloseParenthesis, {
-                    break if let Expr::Variable(name, _) = expr {
-                        Ok(Expr::Call(name, self.tokens[self.idx-1].clone(), args))
+                    break if let Expr::Variable(name) = expr {
+                        Ok(Expr::Call(name, args))
                     } else {
                         perror!(self, 1, "Expected function name before call.")
                     }
@@ -879,18 +942,18 @@ impl Parser {
             | TokenData::SubtractFrom
             | TokenData::DivideBy
             | TokenData::MultiplyBy), {
-                if let Expr::Variable(varname, _) = &target {
+                if let Expr::Variable(varname) = target {
                     let line = self.tokens[self.idx-1].line;
                     let col = self.tokens[self.idx-1].col;
                     let value_expr = match self.tokens[self.idx-1].t {
                         // TokenData::EQUALS => self.expression()?,
-                        TokenData::AddTo => Expr::Binary(Box::new(Expr::Variable(varname.clone(), self.tokens[self.idx].clone())), Token{line, col, len:0, t:TokenData::Plus}, Box::new(self.expression()?)),
-                        TokenData::SubtractFrom => Expr::Binary(Box::new(Expr::Variable(varname.clone(), self.tokens[self.idx].clone())), Token{line, col, len:0, t:TokenData::Minus}, Box::new(self.expression()?)),
-                        TokenData::MultiplyBy => Expr::Binary(Box::new(Expr::Variable(varname.clone(), self.tokens[self.idx].clone())), Token{line, col, len:0, t:TokenData::Star}, Box::new(self.expression()?)),
-                        TokenData::DivideBy => Expr::Binary(Box::new(Expr::Variable(varname.clone(), self.tokens[self.idx].clone())), Token{line, col, len:0, t:TokenData::Slash}, Box::new(self.expression()?)),
+                        TokenData::AddTo => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line, col, len:0, t:TokenData::Plus}, Box::new(self.expression()?)),
+                        TokenData::SubtractFrom => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line, col, len:0, t:TokenData::Minus}, Box::new(self.expression()?)),
+                        TokenData::MultiplyBy => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line, col, len:0, t:TokenData::Star}, Box::new(self.expression()?)),
+                        TokenData::DivideBy => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line, col, len:0, t:TokenData::Slash}, Box::new(self.expression()?)),
                         _ => self.expression()?,
                     };
-                    Ok(Expr::Assignment(varname.clone(), Box::new(value_expr), self.tokens[self.idx].clone()))
+                    Ok(Expr::Assignment(varname, Box::new(value_expr)))
                 } else {
                     let line = self.tokens[self.idx].line;
                     let col = self.tokens[self.idx].col;
@@ -905,26 +968,26 @@ impl Parser {
     }
 
     fn effects_statement(&mut self) -> Result<Stmt, Error> {
-        pexpect_prevtoken!(self, TokenData::Colon, {self.statement(&None)}, "Expected ':' after 'effects'.")
+        pexpect_prevtoken!(self, TokenData::Colon, {self.statement(None)}, "Expected ':' after 'effects'.")
     }
     fn task_statement(&mut self) -> Result<Stmt, Error> {
-        let token_id = self.idx-1;
-        pexpect!(self, TokenData::Label(name), {
-            let name = Rc::new(name.clone());
+        // let token_id = self.idx-1;
+        pexpect!(self, TokenData::Label(_), {
+            let name: LabelToken = self.tokens[self.idx-1].clone().try_into()?;
             let mut preconditions = None;
             pmatch!(self, TokenData::OpenParenthesis, {
-                preconditions = Some(Rc::new(self.expression()?));
+                preconditions = Some(self.expression()?);
                 pexpect!(self, TokenData::CloseParenthesis, {Ok(())}, "Expected ')' after task conditions.")?
             });
             let mut cost = None;
             pmatch!(self, TokenData::Cost, {
-                cost = Some(Rc::new(self.expression()?));
+                cost = Some(self.expression()?);
             });
             pexpect_prevtoken!(self, TokenData::Colon, {
-                let body = Box::new(self.statement(&Some(name.clone()))?);
+                let body = Box::new(self.statement(Some(name.string.as_str()))?);
                 let mut effects = None;
                 pmatch!(self, TokenData::Effects, {effects = Some(Box::new(self.effects_statement()?));});
-                Ok(Stmt::Task{name, preconditions, cost, body, effects, token:self.tokens[token_id].clone()})
+                Ok(Stmt::Task{name, preconditions, cost, body, effects})
             }, "Expected ':' after task label.")
         }, "Expected label after 'task'.")
         
@@ -936,7 +999,7 @@ impl Parser {
             {Ok(Stmt::Expression(expr))}, 
             "Expected new line after expression.")
     }
-    fn block_statement(&mut self, parent_task:&Option<Rc<String>>) -> Result<Stmt, Error> {
+    fn block_statement(&mut self, parent_task:Option<&str>) -> Result<Stmt, Error> {
         let mut stmts = Vec::<Stmt>::new();
         loop {
             let mut stmt = self.statement(parent_task)?;
@@ -953,45 +1016,50 @@ impl Parser {
         }
         
     }
-    fn method_statement(&mut self, parent_task:&Option<Rc<String>>) -> Result<Stmt, Error> {
+    fn method_statement(&mut self, parent_task:Option<&str>) -> Result<Stmt, Error> {
         let token_id = self.idx-1;
-        let parent_task = parent_task.as_ref().map(|p| p.clone()).unwrap();
-        pexpect!(self, TokenData::Label(name), {
-            let name = name.clone();
-            let method_name = Rc::new(format!("{}.{}", parent_task, name));
-            let mut preconditions: Option<Rc<Expr>> = None;
+        let parent_task = parent_task.unwrap();
+        pexpect!(self, TokenData::Label(_), {
+            let mut name: LabelToken = self.tokens[self.idx-1].clone().try_into()?;
+            let else_name = format!("{}.Dont{}", parent_task, name.string);
+            name.string = format!("{}.{}", parent_task, name.string);
+            let mut preconditions: Option<Expr> = None;
             pmatch!(self, TokenData::OpenParenthesis, {
-                preconditions = Some(Rc::new(self.expression()?));
+                preconditions = Some(self.expression()?);
                 pexpect!(self, TokenData::CloseParenthesis, {Ok(())}, "Expected ')' after method conditions.'")?;
             });
             let mut cost = None;
             pmatch!(self, TokenData::Cost, {
-                cost = Some(Rc::new(self.expression()?));
+                cost = Some(self.expression()?);
             });
             pexpect_prevtoken!(self, TokenData::Colon, {
-                let parent_statemet = Stmt::Method{name:method_name, preconditions:preconditions.as_ref().and_then(|p| Some(p.clone())), cost, body:Box::new(self.statement(&None)?), token:self.tokens[token_id].clone()};
+                
+                
                 if preconditions.is_some() {
+                    let parent_statemet = Stmt::Method{name, preconditions:preconditions.clone(), cost, body:Box::new(self.statement(None)?)};
                     ptest!(self, TokenData::Else, {
+                        let else_token = &self.tokens[self.idx-1];
+                        let else_name = LabelToken{line:else_token.line, col:else_token.col, len:else_token.len, string:else_name, idx:None};
                         let mut elsecost = None;
                         pmatch!(self, TokenData::Cost, {
-                            elsecost = Some(Rc::new(self.expression()?));
+                            elsecost = Some(self.expression()?);
                         });
                         let token_id = self.idx-1;
                         pexpect!(self, TokenData::Colon, {
-                            let else_conditions = Expr::Unary(Token{line:self.tokens[token_id].line, col:self.tokens[token_id].col, len:0, t:TokenData::Not}, Box::new(preconditions.unwrap().deref().clone()));
-                            let else_statement = Stmt::Method{name:Rc::new(format!("{}.Dont{}", parent_task, name)), preconditions:Some(Rc::new(else_conditions)), cost:elsecost, body:Box::new(self.statement(&None)?), token:self.tokens[token_id].clone()};
+                            let else_conditions = Expr::Unary(Token{line:self.tokens[token_id].line, col:self.tokens[token_id].col, len:0, t:TokenData::Not}, Box::new(preconditions.unwrap().clone()));
+                            let else_statement = Stmt::Method{name:else_name, preconditions:Some(else_conditions), cost:elsecost, body:Box::new(self.statement(None)?)};
                             Ok(Stmt::Block(vec![parent_statemet, else_statement]))
                         }, "Expected ':' after else clause.")
                     } else {
                         Ok(parent_statemet)
                     })
                 } else {
-                    Ok(parent_statemet)
+                    Ok(Stmt::Method{name, preconditions, cost, body:Box::new(self.statement(None)?)})
                 }
             }, "Expected ':' after method declaration.")
         }, "Expected method name.")
     }
-    fn statement(&mut self, parent:&Option<Rc<String>>) -> Result<Stmt, Error> {
+    fn statement(&mut self, parent:Option<&str>) -> Result<Stmt, Error> {
         // println!("When Parsing a new statement, next token is {}.", self.tokens[self.idx]);
         let r = if let TokenData::Task = self.tokens[self.idx].t {
             self.idx += 1;
@@ -1056,7 +1124,7 @@ impl Parser {
         };
         // Parser::print_tokens(&parser.tokens);
         while parser.idx + 1 < parser.tokens.len() {
-            match parser.statement(&None) {
+            match parser.statement(None) {
                 Err(e) => {errors.push(e); parser.error_recover(); },
                 Ok(s) => ast.push(s)
             }

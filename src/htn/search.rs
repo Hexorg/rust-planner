@@ -1,40 +1,23 @@
-use std::rc::Rc;
-use std::{collections::HashMap, cmp::Reverse, slice::Iter};
+use std::{collections::HashMap, cmp::Reverse};
 use super::interpreter::{State, Evaluatable};
 
-use super::parser::{self, Literal, Stmt};
+use super::parser::{Literal, Stmt};
 use super::planner::{Planner, Error};
 use priority_queue::PriorityQueue;
 
-#[derive(Clone, Debug)]
-pub struct Node<T: std::hash::Hash> {
+#[derive(Clone, Debug, Hash, PartialEq, PartialOrd, Eq, Ord)]
+pub struct Node<'a, T:Copy> {
     pub state:State<T>,
-    pub task_name:Rc<String>,
+    pub task_name:&'a str,
 }
 
-impl<T: std::hash::Hash> std::hash::Hash for Node<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.state.hash(state);
-    }
-}
 
-impl<T: std::hash::Hash + std::cmp::PartialEq + std::fmt::Debug> std::cmp::PartialEq for Node<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.state == other.state 
-    }
-}
-impl<T: std::hash::Hash + std::cmp::PartialEq + std::fmt::Debug> std::cmp::Eq for Node<T> { }
-
-impl<T:std::hash::Hash> Node<T> {
-    fn new(state:State<T>, task_name:Rc<String>) -> Self {
-        Self{state, task_name}
-    }
-}
-
-fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Error> where T: Clone + 
+fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Error> where T: Copy + 
     std::hash::Hash + 
+    Default +
     std::cmp::PartialEq +
     std::cmp::PartialOrd +
+    std::convert::From::<bool> +
     std::convert::From::<Literal> +
     std::fmt::Display + 
     std::ops::Sub<Output = T> + 
@@ -57,7 +40,7 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
 
 
 // impl Astar {
-    fn reconstruct_path<'a>(came_from:HashMap<Rc<String>, Rc<String>>, current:Rc<String>) -> Vec<Rc<String>> where {
+    fn reconstruct_path<'a>(came_from:HashMap<&'a str, &'a str>, current:&'a str) -> Vec<&'a str> where {
         let mut plan = Vec::new();
         // print!("Reconstructing path... ");
         // print!("{}({}), ", current.method_name, current.cost);
@@ -74,14 +57,17 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
     }
 
     /// Outputs a plan UP TO goal, but not including goal
-    pub fn Astar<'a, T, F>(start:State<T>, goal:&'a Stmt, heuristic: F, planner:&Planner<T>) -> Result<Option<(Vec<Rc<String>>, T)>, Error> where  F: Fn(&State<T>)->T,
-        T: Clone + 
+    pub fn Astar<'a, T, F>(start:State<T>, goal:&'a Stmt, heuristic: F, planner:&'a Planner) -> Result<Option<(Vec<&'a str>, i32)>, Error> where  F: Fn(&State<T>)->i32,
+        T: Copy + Default + 
         std::hash::Hash + 
         std::cmp::PartialEq +
+        std::cmp::Eq +
         std::cmp::PartialOrd +
         std::cmp::Ord + 
         std::fmt::Debug + 
         std::fmt::Display + 
+        std::convert::Into::<i32> +
+        std::convert::From::<bool> +
         std::convert::From::<Literal> +
         std::ops::Sub<Output = T> + 
         std::ops::Add<Output = T> + 
@@ -89,25 +75,26 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
         std::ops::Mul<Output = T> +
         std::ops::BitOr<Output = T> + 
         std::ops::BitAnd<Output = T> + 
-        std::ops::Not<Output = T> {
+        std::ops::Not<Output = T>
+        {
         let mut openSet = PriorityQueue::new();
-        let mut cameFrom:HashMap<Rc<String>, Rc<String>> = HashMap::new();
+        let mut cameFrom:HashMap<&str, &str> = HashMap::new();
 
         // For node n, gScore[n] is the cost of the cheapest path from start to n currently known.
-        let mut gScore = HashMap::<State<T>, T>::new();
+        let mut gScore = HashMap::<State<T>, i32>::new();
 
         // For node n, fScore[n] := gScore[n] + h(n). fScore[n] represents our current best guess as to
         // how short a path from start to finish can be if it goes through n.
-        let mut fScore = HashMap::<State<T>, T>::new();
+        let mut fScore = HashMap::<State<T>, i32>::new();
         
         let currentCost = heuristic(&start);
-        openSet.push(Node::new(start.clone(), Rc::new(String::from("__start__"))), Reverse(currentCost.clone()));
-        gScore.insert(start.clone(),  Literal::F(0.0).into());
+        openSet.push(Node{state:start.clone(), task_name:"__start__"}, Reverse(currentCost.clone()));
+        gScore.insert(start.clone(),  0.into());
         fScore.insert(start.clone(), currentCost);
 
         // println!("Start state is {:?}", start);
         
-        let all_tasks:Vec<Rc<String>> = planner.domain.get_all_task_names().iter().map(|k| k.clone()).collect();
+        let all_tasks:Vec<&str> = planner.domain.get_all_task_names();
         while let Some((current, total_plan_cost)) = openSet.pop() {
             // println!("Looking at state that resulted from calling {}: {:?}. Cost to reach: {}", current.task_name, current.state, total_plan_cost.0);
             if are_preconditions_satisfied(goal, &current.state).unwrap() == Literal::B(true).into() {
@@ -141,7 +128,7 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
                         let currentCost = tentative_gScore + heuristic(&new_state);
                         if !fScore.contains_key(&new_state) {
                             // println!("New task {} gets us closer to the goal", task.name().unwrap());
-                            openSet.push(Node::new(new_state.clone(), task_name.clone()), Reverse(currentCost.clone()));
+                            openSet.push(Node{state:new_state.clone(), task_name}, Reverse(currentCost));
                         }
                         fScore.insert(new_state, currentCost);
                     } else {
