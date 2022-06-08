@@ -42,7 +42,10 @@ impl std::fmt::Display for PlannedTask<'_> {
 impl std::fmt::Debug for PlannedTask<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}(", self.stmt.name().unwrap())?;
-        self.stmt.for_each_operator(&mut |op:&Expr| -> Result<bool, std::fmt::Error> {write!(f, "{}, ", op.get_call_target().unwrap_or(Rc::new(String::from("None"))))?; Ok(true)})?;
+        let none = Rc::new(String::from("None"));
+        for op in self.stmt.expressions().unwrap() {
+            write!(f, "{}, ", op.get_call_target().unwrap_or(none.clone()))?;
+        }
         write!(f, ")")
     }
 }
@@ -173,12 +176,11 @@ impl<T> Planner<T> where T: Clone +
             // Ready to run this task
             if task.is_composite()? {
                 let mut method_plans = PriorityQueue::new();
-                task.for_each_method(&mut |method| -> Result<(), Error> { // create plans for running each method
+                for method in task.methods()? {
                     if let Some((method_plan, method_plan_cost)) = Astar(state.clone(), method, |f| Literal::F(4.0).into(), self)? {
                         method_plans.push(method_plan, Reverse(method_plan_cost));
                     }
-                    Ok(())
-                })?;
+                }
                 if let Some((method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
                     for subtask in method_plan {
                         if !self.run_astar(plan, state, self.domain.get_task(&subtask).unwrap())? {
@@ -187,7 +189,14 @@ impl<T> Planner<T> where T: Clone +
                     }
                     // ready to run method
                     plan.push(PlannedTask::from(task));
-                    todo!("Iterate over operators here");
+                    // todo!("Iterate over operators here");
+                    for op in task.expressions()? {
+                        if let Some(call_target) = op.get_call_target() {
+                            if let Some(call_task) = self.domain.get_task(&call_target) {
+                                self.run_astar(plan, state, call_task)?;
+                            }
+                        }
+                    }
                 } else {
                     // no methods are reachable
                     plan.push(PlannedTask::fail(task))
@@ -195,9 +204,15 @@ impl<T> Planner<T> where T: Clone +
             } else {
                 // primitive task is reachable by definition
                 plan.push(PlannedTask::from(task));
-                todo!("Iterate over operators here");
+                for op in task.expressions()? {
+                    if let Some(call_target) = op.get_call_target() {
+                        if let Some(call_task) = self.domain.get_task(&call_target) {
+                            self.run_astar(plan, state, call_task)?;
+                        }
+                    }
+                }
             }
-            task.effects()?.as_ref().and_then(|s| {s.for_each_operator(&mut |e| -> Result<bool, parser::Error> {e.eval_mut(state)?; Ok(true) }); Option::<i32>::None});
+            task.effects()?.as_ref().and_then(|s| {for op in s.expressions().unwrap() { op.eval_mut(state); } Option::<i32>::None});
             Ok(plan.0.last().unwrap_or(&PlannedTask::from(task)).is_complete)
         } else {
             // this task isn't reachable

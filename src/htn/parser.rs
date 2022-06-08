@@ -269,10 +269,10 @@ impl Lexer {
                     } // done with tab depth detection
                     // Now to see what kind of token this character will yield.
                     if let Some(mut last_token) = r.last_mut() {
+                        let should_convert = if let Some(next_char) = it.peek() { !next_char.is_alphanumeric() } else { true };
                         if let Token{t:Label(label), ..} = last_token {
                             label.push(c);
                             last_token.len += 1;
-                            let should_convert = if let Some(next_char) = it.peek() { !next_char.is_alphanumeric() } else { true };
                             if let Some(t) = if should_convert {
                                     match label.as_str() { // if the label composes a keyword, replace with keyword
                                         "task" => Some(Task),
@@ -286,19 +286,26 @@ impl Lexer {
                                         "not" => Some(Not),
                                         "false" => Some(Literal(self::Literal::B(false))),
                                         "true" => Some(Literal(self::Literal::B(false))),
-                                        _ => if let Ok(literal) = label.parse::<f32>() {
+                                        _ => { if let Ok(literal) = label.parse::<f32>() {
                                                 Some(Literal(self::Literal::F(literal)))
                                             } else if let Ok(literal) = label.parse::<i32>() {
                                                 Some(Literal(self::Literal::I(literal)))
-                                            } else { None },
+                                            } else { None }},
                                     }
                                 } else { None } {
                                 last_token.t = t;
                             }
                         } else { // last token isn't a label so we're starting a new label or keyword
-                            r.push(Token{line, col, len:1, t:Label(String::from(c))})
+                            if should_convert {
+                                if c.is_numeric() {
+                                    r.push(Token{line, col, len:1, t:Literal(self::Literal::I(c.to_digit(10).unwrap() as i32))})
+                                }
+                            } else {
+                                r.push(Token{line, col, len:1, t:Label(String::from(c))})
+                            }
                         }
                     } else {
+                        // this is the first token ever
                         r.push(Token{line, col, len:1, t:Label(String::from(c))})
                     }
                 },
@@ -553,6 +560,42 @@ impl std::fmt::Debug for StmtFormatter<'_> {
     }
 }
 
+pub struct OperatorIterator<'a> {
+    pos: usize,
+    statements: &'a Vec<Stmt>
+}
+
+impl<'a> Iterator for OperatorIterator<'a> {
+    type Item = &'a Expr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+       let r = match self.statements.get(self.pos) {
+            Some(Stmt::Expression(e)) => Some(e),
+            _ => None,
+       };
+       self.pos += 1;
+       r
+    }
+}
+
+pub struct MethodIterator<'a> {
+    pos: usize,
+    statements: &'a Vec<Stmt>
+}
+
+impl<'a> Iterator for MethodIterator<'a> {
+    type Item = &'a Stmt;
+
+    fn next(&mut self) -> Option<Self::Item> {
+       let r = match self.statements.get(self.pos) {
+            Some(stmt) => match stmt { Stmt::Method{..} => Some(stmt), _ => None },
+            _ => None,
+       };
+       self.pos += 1;
+       r
+    }
+}
+
 
 impl Stmt {
     pub fn to_err(&self, msg:String) -> Error {
@@ -626,30 +669,27 @@ impl Stmt {
         }
     }
 
-    pub fn for_each_method<'a, F, E>(&'a self, func:&mut F) -> Result<(), E> where F: FnMut(&'a Self) -> Result<(), E>, E:std::error::Error {
+    
+
+
+    /// Will iterate over all expressions in this statement. 
+    /// If this is a composite task it'll iterate over all of the methods and their statements too
+    pub fn expressions<'a>(&'a self) -> Result<OperatorIterator<'a>, Error> {
         match self {
-            Self::Task{body,..} => body.for_each_method(func),
-            Self::Block(blk) => {for stmt in blk { stmt.for_each_method(func)? } Ok(())},
-            Self::Method{..} => func(self),
-            _ => Ok(()),
+            Self::Task{body,..} |
+            Self::Method{body,..} => body.expressions(),
+            Self::Block(v) => Ok(OperatorIterator { pos: 0, statements: v }),
+            //Self::Expression(_) => OperatorIterator { pos: 0, statements: &vec![self.clone()] }
+            _ => Err(self.to_err(String::from("Statement doesn't support expressions.")))
         }
     }
 
-    pub fn for_each_operator<'a, F, E>(&'a self, func:&mut F) -> Result<bool, E> where F: FnMut(&'a Expr) -> Result<bool, E>, E:std::error::Error {
+    pub fn methods<'a>(&'a self) -> Result<MethodIterator<'a>, Error> {
         match self {
-            Self::Task{body,..} |
-            Self::Method{body,..} => body.for_each_operator(func),
-            Self::Block(blk) => {let mut acc = true; for stmt in blk { acc &= stmt.for_each_operator(func)? } Ok(acc)},
-            Self::Expression(e) => func(e)
-        }
-    }
- 
-    pub fn for_each_method_while<'a, F, E>(&'a self, func:&mut F) -> Result<bool, E> where F: FnMut(&'a Self) -> Result<bool, E>, E:std::error::Error {
-        match self {
-            Self::Task{body,..} => body.for_each_method_while(func),
-            Self::Block(blk) => {for stmt in blk { if !stmt.for_each_method_while(func)? { break } }; Ok(false)},
-            Self::Method{..} => func(self),
-            _ => Ok(false),
+            Self::Task{body,..} => body.methods(),
+            Self::Block(v) => Ok(MethodIterator { pos: 0, statements: v }),
+            // Self::Method{..} => Ok(MethodIterator{pos:0, statements: &vec![self.clone()]}),
+            _ => Err(self.to_err(String::from("Expression statement can't have any methods.")))
         }
     }
 
@@ -976,10 +1016,10 @@ impl Parser {
         let mut depth = 0;
         println!("{}", tokens.iter().fold(String::new(), |acc, item| {
                 let item_string = match item.t {
-                    TokenData::BlockStart => {depth += 1; format!("{}", item)},
-                    TokenData::BlockEnd => {format!("{}\n", item)},
-                    TokenData::Colon => format!("{}\n", item),
-                    _ => format!("{} ", item),
+                    TokenData::BlockStart => {depth += 1; format!("{:?}", item)},
+                    TokenData::BlockEnd => {format!("{:?}\n", item)},
+                    TokenData::Colon => format!("{:?}\n", item),
+                    _ => format!("{:?} ", item),
                 };
                 let r = if acc.ends_with('\n') || acc.len() == 0 {
                     acc + &format!("{:4}: {:width$}{}", item.line, ' ', item_string, width=depth*4)

@@ -18,12 +18,12 @@ impl<T: std::hash::Hash> std::hash::Hash for Node<T> {
     }
 }
 
-impl<T: std::hash::Hash + std::cmp::PartialEq> std::cmp::PartialEq for Node<T> {
+impl<T: std::hash::Hash + std::cmp::PartialEq + std::fmt::Debug> std::cmp::PartialEq for Node<T> {
     fn eq(&self, other: &Self) -> bool {
         self.state == other.state 
     }
 }
-impl<T: std::hash::Hash + std::cmp::PartialEq> std::cmp::Eq for Node<T> { }
+impl<T: std::hash::Hash + std::cmp::PartialEq + std::fmt::Debug> std::cmp::Eq for Node<T> { }
 
 impl<T:std::hash::Hash> Node<T> {
     fn new(state:State<T>, task_name:Rc<String>) -> Self {
@@ -98,12 +98,13 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
         // For node n, fScore[n] := gScore[n] + h(n). fScore[n] represents our current best guess as to
         // how short a path from start to finish can be if it goes through n.
         let mut fScore = HashMap::<State<T>, T>::new();
-
-        let mut currentCost = heuristic(&start);
         
+        let currentCost = heuristic(&start);
         openSet.push(Node::new(start.clone(), Rc::new(String::from("__start__"))), Reverse(currentCost.clone()));
         gScore.insert(start.clone(),  Literal::F(0.0).into());
-        fScore.insert(start, currentCost);
+        fScore.insert(start.clone(), currentCost);
+
+        // println!("Start state is {:?}", start);
         
         let all_tasks:Vec<Rc<String>> = planner.domain.get_all_task_names().iter().filter(|p| p.as_str() != "Main").map(|k| k.clone()).collect();
         while let Some((current, total_plan_cost)) = openSet.pop() {
@@ -121,14 +122,18 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
                 let (task, cost) = planner.get_task_and_cost(task_name, &current.state)?;
                 if are_preconditions_satisfied(task, &current.state).unwrap() == Literal::B(true).into() {
                     // println!("conditions are satisfied");
+                    // println!("Current state is {:?}", current.state);
+                    // println!("gScore contains current.state? {}", gScore.contains_key(&current.state));
+                    // println!("gScore.keys(): {:?}", gScore.keys());
                     let tentative_gScore = gScore.get(&current.state).unwrap_or(&Literal::F(f32::INFINITY).into()).clone();
+                    // println!("After {}({:?}) tentative_gScore is {}",current.task_name, current.state, tentative_gScore);
                     let mut new_state = current.state.clone();
-                    task.effects()?.as_ref().and_then(|s| {s.for_each_operator(&mut |e| -> Result<bool, parser::Error> {e.eval_mut(&mut new_state)?; Ok(true) }); Option::<i32>::None});
+                    task.effects()?.as_ref().and_then(|s| {for op in s.expressions().unwrap() { op.eval_mut(&mut new_state); } Option::<i32>::None});
                     if !gScore.contains_key(&new_state) || tentative_gScore < gScore[&new_state] {
                         cameFrom.insert(task_name.clone(), current.task_name.clone());
                         // println!("Adding hop from {} to {}", new_state.method_name.clone(), current.method_name.clone());
                         gScore.insert(new_state.clone(), tentative_gScore.clone());
-                        currentCost = tentative_gScore + heuristic(&new_state);
+                        let currentCost = tentative_gScore + heuristic(&new_state);
                         if !fScore.contains_key(&new_state) {
                             // println!("New task {} gets us closer to the goal", task.name().unwrap());
                             openSet.push(Node::new(new_state.clone(), task_name.clone()), Reverse(currentCost.clone()));

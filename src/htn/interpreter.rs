@@ -6,17 +6,17 @@ pub struct State<T: std::hash::Hash>(pub HashMap<Rc<String>, T>);
 
 impl<T> std::hash::Hash for State<T> where T:std::hash::Hash {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.values().for_each(|val| val.hash(state))
+        self.0.iter().for_each(|(key, val)| {key.hash(state); val.hash(state);})
     }
 }
-impl<T> std::cmp::PartialEq for State<T>  where T:std::hash::Hash + std::cmp::PartialEq {
+impl<T> std::cmp::PartialEq for State<T>  where T:std::hash::Hash + std::cmp::PartialEq + std::fmt::Debug {
     fn eq(&self, other: &Self) -> bool {
-        let mut result = false;
-        self.0.values().zip(other.0.values()).fold(&mut result, |acc, (left, right)| {*acc &=  left == right; acc});
+        let mut result = true;
+        self.0.iter().fold(&mut result, |acc, (k, v)| {*acc &=  other.0.contains_key(k) && other.0[k] == *v; acc});
         result
     }
 }
-impl<T> std::cmp::Eq for State<T> where T:std::hash::Hash + std::cmp::PartialEq { }
+impl<T> std::cmp::Eq for State<T> where T:std::hash::Hash + std::cmp::PartialEq + std::fmt::Debug { }
 
 
 trait AsRC { fn asRC(&self) -> Rc<String>; }
@@ -55,7 +55,6 @@ pub trait Evaluatable<T> where T: Clone +
         std::hash::Hash  + 
         std::cmp::PartialEq +
         std::cmp::PartialOrd +
-        std::convert::From::<parser::Literal> + 
         std::ops::Sub<Output = T> + 
         std::ops::Add<Output = T> + 
         std::ops::Div<Output = T> + 
