@@ -18,11 +18,16 @@ fn main() {
     state.0.insert(Rc::new(String::from("hunger")), 6 as i32);
     state.0.insert(Rc::new(String::from("have_supply_need")), 0 as i32);
     state.0.insert(Rc::new(String::from("carryFood")), 0 as i32);
-    state.0.insert(Rc::new(String::from("rHasFood")), 0 as i32);
+    state.0.insert(Rc::new(String::from("rHasFood")), 1 as i32);
     state.0.insert(Rc::new(String::from("at")), 0 as i32);
 
 
     let plan = planner.plan(&state).unwrap();
+    if let Some(last_task) = plan.0.iter().last() {
+        if !last_task.is_complete {
+            println!("Partial plan!");
+        }
+    }
     println!("Planer finished successfully. Plan: {:?}", plan);
 
 

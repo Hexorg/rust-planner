@@ -5,6 +5,7 @@ task Main:
 task Work:
 	method Eat(hunger>5):
 		Eat()
+		call_daddy()
 	method Supply(have_supply_need):
 		target = find_supply_need()
 		goto(warehouse)

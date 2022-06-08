@@ -285,7 +285,7 @@ impl Lexer {
                                         "and" => Some(And),
                                         "not" => Some(Not),
                                         "false" => Some(Literal(self::Literal::B(false))),
-                                        "true" => Some(Literal(self::Literal::B(false))),
+                                        "true" => Some(Literal(self::Literal::B(true))),
                                         _ => { if let Ok(literal) = label.parse::<f32>() {
                                                 Some(Literal(self::Literal::F(literal)))
                                             } else if let Ok(literal) = label.parse::<i32>() {
@@ -678,7 +678,7 @@ impl Stmt {
         match self {
             Self::Task{body,..} |
             Self::Method{body,..} => body.expressions(),
-            Self::Block(v) => Ok(OperatorIterator { pos: 0, statements: v }),
+            Self::Block(v) =>  Ok(OperatorIterator { pos: 0, statements: v }),
             //Self::Expression(_) => OperatorIterator { pos: 0, statements: &vec![self.clone()] }
             _ => Err(self.to_err(String::from("Statement doesn't support expressions.")))
         }

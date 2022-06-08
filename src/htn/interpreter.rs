@@ -13,6 +13,7 @@ impl<T> std::cmp::PartialEq for State<T>  where T:std::hash::Hash + std::cmp::Pa
     fn eq(&self, other: &Self) -> bool {
         let mut result = true;
         self.0.iter().fold(&mut result, |acc, (k, v)| {*acc &=  other.0.contains_key(k) && other.0[k] == *v; acc});
+        // println!("\tCMP: {:?} == {:?} ? {}", self.0, other.0, result);
         result
     }
 }
@@ -71,6 +72,7 @@ impl<T> Evaluatable<T> for Expr where T: Clone +
         std::cmp::PartialEq +
         std::cmp::PartialOrd +
         std::convert::From::<parser::Literal> +
+        std::fmt::Display +
         std::ops::Sub<Output = T> + 
         std::ops::Add<Output = T> + 
         std::ops::Div<Output = T> + 

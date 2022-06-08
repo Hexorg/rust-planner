@@ -36,6 +36,7 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
     std::cmp::PartialEq +
     std::cmp::PartialOrd +
     std::convert::From::<Literal> +
+    std::fmt::Display + 
     std::ops::Sub<Output = T> + 
     std::ops::Add<Output = T> + 
     std::ops::Div<Output = T> + 
@@ -106,11 +107,11 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
 
         // println!("Start state is {:?}", start);
         
-        let all_tasks:Vec<Rc<String>> = planner.domain.get_all_task_names().iter().filter(|p| p.as_str() != "Main").map(|k| k.clone()).collect();
+        let all_tasks:Vec<Rc<String>> = planner.domain.get_all_task_names().iter().map(|k| k.clone()).collect();
         while let Some((current, total_plan_cost)) = openSet.pop() {
             // println!("Looking at state that resulted from calling {}: {:?}. Cost to reach: {}", current.task_name, current.state, total_plan_cost.0);
             if are_preconditions_satisfied(goal, &current.state).unwrap() == Literal::B(true).into() {
-                // println!("Can reach {} now with {:?}", goal.name().unwrap(), current.state.0);
+                // println!("ASTAR Success: Can reach {} now with {:?}", goal.name().unwrap(), current.state.0);
                 // println!("came from:");
                 // cameFrom.iter().for_each(|(k, v)| println!("From {} to {}", k, v.method_name));
                 return Ok(Some((reconstruct_path(cameFrom, current.task_name), total_plan_cost.0)));
@@ -121,17 +122,21 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
                 // println!("Can we run {}? ", task_name);
                 let (task, cost) = planner.get_task_and_cost(task_name, &current.state)?;
                 if are_preconditions_satisfied(task, &current.state).unwrap() == Literal::B(true).into() {
-                    // println!("conditions are satisfied");
+                    // println!("conditions are satisfied for {}", task_name);
                     // println!("Current state is {:?}", current.state);
                     // println!("gScore contains current.state? {}", gScore.contains_key(&current.state));
                     // println!("gScore.keys(): {:?}", gScore.keys());
                     let tentative_gScore = gScore.get(&current.state).unwrap_or(&Literal::F(f32::INFINITY).into()).clone();
                     // println!("After {}({:?}) tentative_gScore is {}",current.task_name, current.state, tentative_gScore);
                     let mut new_state = current.state.clone();
-                    task.effects()?.as_ref().and_then(|s| {for op in s.expressions().unwrap() { op.eval_mut(&mut new_state); } Option::<i32>::None});
+                    if let Some(stmt) = task.effects()? {
+                        for op in stmt.expressions()? {  
+                            op.eval_mut(&mut new_state)?; 
+                        } 
+                    }
                     if !gScore.contains_key(&new_state) || tentative_gScore < gScore[&new_state] {
                         cameFrom.insert(task_name.clone(), current.task_name.clone());
-                        // println!("Adding hop from {} to {}", new_state.method_name.clone(), current.method_name.clone());
+                        // println!("Adding hop from {} to {}", task_name.clone(), current.task_name.clone());
                         gScore.insert(new_state.clone(), tentative_gScore.clone());
                         let currentCost = tentative_gScore + heuristic(&new_state);
                         if !fScore.contains_key(&new_state) {
@@ -139,12 +144,16 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
                             openSet.push(Node::new(new_state.clone(), task_name.clone()), Reverse(currentCost.clone()));
                         }
                         fScore.insert(new_state, currentCost);
+                    } else {
+                        // println!("This task provides an existing state");
                     }
                 } else {
                     // println!("conditions are NOT satisfied");
                 }
             }
+            // println!("No more neighbors");
         }
+        // println!("ASTAR FAIL");
         return Ok(None);
     }
 // }
