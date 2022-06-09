@@ -201,7 +201,7 @@ impl Planner {
         
     }
 
-    fn run_astar<'a, T>(&'a self, plan:&mut Plan<'a>, state:&mut State<T>, task: &'a Stmt) -> Result<bool, Error> 
+    fn run_astar<'a, T>(&'a self, plan:&mut Plan<'a>, state:&mut State<T>, task: &'a Stmt, depth:usize) -> Result<bool, Error> 
     where T: Copy + std::hash::Hash + Default +
         std::fmt::Debug + 
         std::fmt::Display +
@@ -223,17 +223,20 @@ impl Planner {
             return Ok(true)
         }
 
-        // println!("Figuring out plan for {}", task.name()?);
+        println!("{:>depth$}Figuring out plan for {}", ' ', task.name()?, depth=depth);
 
         if let Some((task_plan, _task_plan_cost)) = Astar(state.clone(), task, |f| Literal::F(4.0).into(), self)? {
-            // println!("Astar returned cost{} {:?}", _task_plan_cost, task_plan);
+            if task_plan.len() > 0 {
+                println!("{:>depth$}To run {} we ned to run (cost {}) {:?}", ' ', task.name()?, _task_plan_cost, task_plan, depth=depth);
+            }
             for subtask in task_plan {
-                if !self.run_astar(plan, state, self.domain.get_task(&subtask).unwrap())? {
+                if !self.run_astar(plan, state, self.domain.get_task(&subtask).unwrap(), depth+2)? {
                     return Err(task.to_err(String::from("Planner thought task is achievable but it's not")).into());
                 }
             }
             // Ready to run this task
             if task.is_composite()? {
+
                 let mut method_plans = PriorityQueue::new();
                 for method in task.methods()? {
                     if let Some((mut method_plan, method_plan_cost)) = Astar(state.clone(), method, |f| Literal::F(4.0).into(), self)? {
@@ -243,25 +246,28 @@ impl Planner {
                 }
                 if let Some((mut method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
                     let method_name = method_plan.pop().unwrap();
+                    println!("{:>depth$}{} is composite -> Choosing to run {}", ' ', task.name()?, method_name, depth=depth);
+                    if method_plan.len() > 0 {
+                        println!("{:>depth$}To run {} we ned to run (cost {}) {:?}", ' ', method_name, _method_plan_cost.0, method_plan, depth=depth);
+                    }
                     for subtask in method_plan {
-                        if !self.run_astar(plan, state, self.domain.get_task(&subtask).unwrap())? {
+                        if !self.run_astar(plan, state, self.domain.get_task(&subtask).unwrap(), depth+2)? {
                             return Err(task.to_err(String::from("Planner thought task is achievable but it's not")).into());
                         }
                     }
                     // ready to run method
-                    
                     for method in task.methods()? {
                         if method.name()? == method_name {
-                            self.run_astar(plan, state, method)?;
+                            self.run_astar(plan, state, method, depth+2)?;
                             break
                         }    
                     }
                 } else {
-                    // no methods are reachable
+                    println!("{:>depth$}{} is composite, but we can't run any methods. Abort.", ' ', task.name()?, depth=depth);
                     plan.push(PlannedTask::fail(task))
                 }
             } else {
-                
+                println!("{:>depth$} Processing {}'s operators...", ' ', task.name()?, depth=depth);
                 let mut planned_task = PlannedTask::from(task);
                 let mut have_more_data = false;
                 for op in task.expressions()? {
@@ -272,7 +278,7 @@ impl Planner {
                             }
                             have_more_data = false;
                             planned_task = PlannedTask::from(task);
-                            self.run_astar(plan, state, call_task)?;
+                            self.run_astar(plan, state, call_task, depth+2)?;
                         } else {
                             planned_task.operators.push(op);
                             have_more_data = true;
@@ -321,7 +327,7 @@ impl Planner {
         std::ops::Not<Output = T> {
         let mut plan = Plan::new();
         let mut state = state.clone();
-        self.run_astar(&mut plan, &mut state, self.domain.get_main())?;
+        self.run_astar(&mut plan, &mut state, self.domain.get_main(), 0)?;
         Ok(plan)
     }
 }

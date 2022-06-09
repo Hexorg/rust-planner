@@ -1,4 +1,5 @@
 mod htn;
+use std::hash::Hash;
 use std::rc::Rc;
 
 // use htn::parser::Literal;
@@ -23,6 +24,16 @@ fn main() {
     state.set(*vid.get("carryFood").unwrap(), B(false));
     state.set(*vid.get("rHasFood").unwrap(), B(true));
     state.set(*vid.get("at").unwrap(), I(1));
+
+    let mut test = state.clone();
+    test.set(*vid.get("at").unwrap(), I(1));
+    dbg!(state.cmp(&test));
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    test.hash(& mut h);
+    dbg!(h);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    state.hash(&mut h);
+    dbg!(h);
 
 
     let plan = planner.plan(&state).unwrap();

@@ -312,8 +312,12 @@ impl Lexer {
                                         "not" => Some(Not),
                                         "false" => Some(Literal(self::Literal::B(false))),
                                         "true" => Some(Literal(self::Literal::B(true))),
-                                        _ => { if let Ok(literal) = label.parse::<f32>() {
-                                                Some(Literal(self::Literal::F(literal)))
+                                        _ => { if label.contains('.') { 
+                                                if let Ok(literal) = label.parse::<f32>() {
+                                                    Some(Literal(self::Literal::F(literal)))
+                                                } else {
+                                                    None
+                                                }
                                             } else if let Ok(literal) = label.parse::<i32>() {
                                                 Some(Literal(self::Literal::I(literal)))
                                             } else { None }},
@@ -614,25 +618,6 @@ impl<'a> Iterator for OperatorIterator<'a> {
        r
     }
 }
-
-// pub struct MutOperatorIterator<'a> {
-//     pos: usize,
-//     statements: &'a mut Vec<Stmt>
-// }
-
-// impl<'a> Iterator for MutOperatorIterator<'a> {
-//     type Item = &'a mut Expr;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         let buffer = self.statements.as_mut_ptr();
-//         // let r = match  {
-//         //         Some(Stmt::Expression(e)) => Some(e),
-//         //         _ => None,
-//         // };
-//         self.pos += 1;
-//         m
-//     }
-// }
 
 pub struct MethodIterator<'a> {
     pos: usize,

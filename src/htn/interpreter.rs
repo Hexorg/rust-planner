@@ -21,6 +21,11 @@ impl<T:Copy + Default> State<T> {
     }
 }
 
+// impl<T:std::hash::Hash> std::hash::Hash for State<T> {
+//     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+//         self.0.iter().for_each(|i|i.hash(state));
+//     }
+// }
 
 pub trait Evaluatable<T> where T: Copy + 
         std::cmp::PartialEq +
