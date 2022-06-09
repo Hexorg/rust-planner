@@ -4,7 +4,7 @@ use crate::htn::parser::LabelToken;
 use super::parser::{self, Expr, Error, TokenData};
 
 #[derive(Clone, Debug, std::hash::Hash, std::cmp::PartialEq, std::cmp::PartialOrd, std::cmp::Eq, std::cmp::Ord)]
-pub struct State<T>(pub Vec<T>);
+pub struct State<T>(Vec<T>);
 
 
 impl<T:Copy + Default> State<T> {
@@ -101,9 +101,176 @@ pub enum StateType {
 
 impl std::hash::Hash for StateType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        core::mem::discriminant(self).hash(state);
+        match self {
+            StateType::I(i) => i.hash(state),
+            StateType::B(b) => b.hash(state),
+            StateType::F(f) => if f.is_normal() { f.to_bits().hash(state) } else { i32::MAX.hash(state)},
+        }
     }
 }
+
+impl std::cmp::Eq for StateType {
+
+}
+
+impl std::cmp::Ord for StateType {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering::*;
+        match (self, other) {
+            (StateType::I(i), StateType::I(oi)) => i.cmp(oi),
+            (StateType::I(_), StateType::B(_)) => Greater,
+            (StateType::I(_), StateType::F(_)) => Less,
+            (StateType::B(_), StateType::I(_)) => Less,
+            (StateType::B(b), StateType::B(bo)) => b.cmp(bo),
+            (StateType::B(_), StateType::F(_)) => Less,
+            (StateType::F(_), StateType::I(_)) => Greater,
+            (StateType::F(_), StateType::B(_)) => Greater,
+            (StateType::F(f), StateType::F(fo)) => match (f.is_normal(),fo.is_normal()) {
+                (true, true) => f.partial_cmp(fo).unwrap(),
+                (true, false) => Less,
+                (false, true) => Greater,
+                (false, false) => Equal,
+            }
+        }
+    }
+}
+
+impl std::default::Default for StateType {
+    fn default() -> Self {
+        Self::I(0)
+    }
+}
+
+impl From<bool> for StateType {
+    fn from(v: bool) -> Self {
+        Self::B(v)
+    }
+}
+
+impl From<parser::Literal> for StateType {
+    fn from(l: parser::Literal) -> Self {
+        match l {
+            parser::Literal::I(i) => Self::I(i),
+            parser::Literal::F(f) => Self::F(f),
+            parser::Literal::B(b) => Self::B(b),
+        }
+    }
+}
+
+impl std::ops::Sub for StateType {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        use StateType::*;
+        match (self, rhs) {
+            (StateType::I(i), StateType::I(ri)) => I(i-ri),
+            (StateType::F(f), StateType::F(rf)) => F(f-rf),
+            _ => panic!("Attempt to subtract unsupported types"),
+        }
+    }
+}
+
+impl std::ops::Add for StateType {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        use StateType::*;
+        match (self, rhs) {
+            (StateType::I(i), StateType::I(ri)) => I(i+ri),
+            (StateType::F(f), StateType::F(rf)) => F(f+rf),
+            _ => panic!("Attempt to subtract unsupported types"),
+        }
+    }
+}
+
+impl std::ops::Mul for StateType {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        use StateType::*;
+        match (self, rhs) {
+            (StateType::I(i), StateType::I(ri)) => I(i*ri),
+            (StateType::F(f), StateType::F(rf)) => F(f*rf),
+            _ => panic!("Attempt to subtract unsupported types"),
+        }
+    }
+}
+
+impl std::ops::Div for StateType {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        use StateType::*;
+        match (self, rhs) {
+            (StateType::I(i), StateType::I(ri)) => I(i/ri),
+            (StateType::F(f), StateType::F(rf)) => F(f/rf),
+            _ => panic!("Attempt to subtract unsupported types"),
+        }
+    }
+}
+
+impl std::ops::BitOr for StateType {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        use StateType::*;
+        match (self, rhs) {
+            (I(i), I(ir)) => I(i | ir),
+            (I(i), B(b)) |
+            (B(b), I(i)) => I(i | if b { 1 } else { 0 }),
+            (B(b), B(br)) => B(b || br),
+            _ => panic!("Attempt to Or unsupported types"),
+        }
+    }
+}
+
+impl std::ops::BitAnd for StateType {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        use StateType::*;
+        match (self, rhs) {
+            (I(i), I(ir)) => I(i & ir),
+            (I(i), B(b)) |
+            (B(b), I(i)) => if b { B(i & 1 > 0) } else { B(b) },
+            (B(b), B(br)) => B(b && br),
+            _ => panic!("Attempt to And unsupported types"),
+        }
+    }
+}
+
+impl std::ops::Not for StateType {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        use StateType::*;
+        match self {
+            B(b) => B(!b),
+            _ => panic!("Attempt to NOT unsupported types"),
+        }
+    }
+}
+
+impl std::convert::Into<i32> for StateType {
+    fn into(self) -> i32 {
+        match self {
+            StateType::I(i) => i,
+            StateType::B(b) => if b { 1 } else { 0 },
+            StateType::F(f) => if f.is_normal() { unsafe { f.to_int_unchecked() } } else { i32::MAX },
+        }
+    }
+}
+
+impl std::convert::Into<bool> for StateType {
+    fn into(self) -> bool {
+        match self {
+            StateType::I(i) => i == 1,
+            StateType::B(b) => b,
+            _ => panic!("Can not convert f32 to bool")
+        }
+    }
+}
+
 
 impl std::fmt::Display for StateType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

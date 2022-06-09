@@ -3,7 +3,7 @@ use std::{fmt, rc::Rc, collections::{HashSet, HashMap}, ops::Deref, convert::{Tr
 pub struct Error {
     line: usize,
     col: usize,
-    message: String
+    message: String,
 }
 
 impl fmt::Display for Error {
@@ -686,6 +686,13 @@ impl Stmt {
             Self::Method{cost:None,..} | 
             Self::Task{cost:None,..} => Ok(None),
             _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
+        }
+    }
+
+    pub fn is_task(&self) -> bool {
+        match self {
+            Self::Task{..} => true,
+            _ => false,
         }
     }
 

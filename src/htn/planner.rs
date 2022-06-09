@@ -44,9 +44,9 @@ impl std::fmt::Display for PlannedTask<'_> {
 impl std::fmt::Debug for PlannedTask<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}(", self.stmt.name().unwrap())?;
-        for op in &self.operators {
-            write!(f, "{}, ", op.get_call_target().unwrap_or("None"))?;
-        }
+        let mut i = self.operators.iter();
+        i.by_ref().take(1).try_for_each(|op| write!(f, "{}", op.get_call_target().unwrap_or("None")))?;
+        i.try_for_each(|op| write!(f, ", {}", op.get_call_target().unwrap_or("None")))?;
         write!(f, ")")
     }
 }
@@ -106,8 +106,9 @@ impl<'a> std::fmt::Display for Plan<'a> {
 impl<'a> std::fmt::Debug for Plan<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{} task plan: ", self.0.len())?;
-        //i.by_ref().take(1).try_for_each(|task| write!(f, "{:?}", task))?;
-        self.0.iter().try_for_each(|task| write!(f, "{:?}", task))
+        let mut i = self.0.iter();
+        i.by_ref().take(1).try_for_each(|task| write!(f, "{:?}", task))?;
+        i.try_for_each(|task| write!(f, ", {:?}", task))
     }
 }
  
@@ -158,6 +159,7 @@ impl Planner {
             std::cmp::Ord + 
             std::convert::Into::<i32> +
             std::convert::From::<bool> + 
+            std::convert::Into::<bool> +
             std::convert::From::<parser::Literal> +
             std::ops::Sub<Output = T> +
             std::ops::Add<Output = T> + 
@@ -169,7 +171,7 @@ impl Planner {
 
         let cost = stmt.cost()?.and_then(|e| Some(e.eval(state).unwrap())).unwrap_or_default();
         let time = self.task_duration.get(stmt.name()?).unwrap_or(&0);
-        Ok(cost.into() * time)
+        Ok(<T as Into<i32>>::into(cost) * time)
     }
 
     pub fn get_task_and_cost<T>(&self, task:&str, state:&State<T>) -> Result<(&Stmt, i32), Error> 
@@ -181,6 +183,7 @@ impl Planner {
         std::cmp::Ord + 
         std::convert::Into::<i32> +
         std::convert::From::<bool> +
+        std::convert::Into::<bool> +
         std::convert::From::<parser::Literal> +
         std::ops::Sub<Output = T> +
         std::ops::Add<Output = T> + 
@@ -207,6 +210,7 @@ impl Planner {
         std::cmp::Ord + 
         std::convert::Into::<i32> +
         std::convert::From::<bool> +
+        std::convert::Into::<bool> +
         std::convert::From::<parser::Literal> +
         std::ops::Sub<Output = T> +
         std::ops::Add<Output = T> + 
@@ -238,7 +242,6 @@ impl Planner {
                     }
                 }
                 if let Some((mut method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
-                    println!("Method plan: {:?}", method_plan);
                     let method_name = method_plan.pop().unwrap();
                     for subtask in method_plan {
                         if !self.run_astar(plan, state, self.domain.get_task(&subtask).unwrap())? {
@@ -249,7 +252,7 @@ impl Planner {
                     
                     for method in task.methods()? {
                         if method.name()? == method_name {
-                            self.run_astar(plan, state, method);
+                            self.run_astar(plan, state, method)?;
                             break
                         }    
                     }
@@ -280,10 +283,12 @@ impl Planner {
                     plan.push(planned_task);
                 }
             }
-            if let Some(stmt) = task.effects()? {
-                for op in stmt.expressions()? {  
-                    op.eval_mut(state)?; 
-                } 
+            if task.is_task() {
+                if let Some(stmt) = task.effects()? {
+                    for op in stmt.expressions()? {  
+                        op.eval_mut(state)?; 
+                    } 
+                }
             }
             Ok(plan.0.last().unwrap_or(&PlannedTask::from(task)).is_complete)
         } else {
@@ -305,6 +310,7 @@ impl Planner {
         std::cmp::Ord + 
         std::convert::Into::<i32> +
         std::convert::From::<bool> +
+        std::convert::Into::<bool> +
         std::convert::From::<parser::Literal> +
         std::ops::Sub<Output = T> +
         std::ops::Add<Output = T> + 

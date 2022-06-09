@@ -15,14 +15,14 @@ fn main() {
     print!("{:?}", domain);
     let planner = Planner::new(domain);
     let vid = &planner.domain.variable_ids;
-    println!("Variable map: {:?}", vid);
     let state_size = planner.domain.variable_ids.len();
-    let mut state = State::new(state_size);
-    state.set(*vid.get("hunger").unwrap(), 6 as i32);
-    state.0.insert(*vid.get("have_supply_need").unwrap(), 0 as i32);
-    state.0.insert(*vid.get("carryFood").unwrap(), 0 as i32);
-    state.0.insert(*vid.get("rHasFood").unwrap(), 1 as i32);
-    state.0.insert(*vid.get("at").unwrap(), 0 as i32);
+    let mut state = State::<StateType>::new(state_size);
+    use StateType::*;
+    state.set(*vid.get("hunger").unwrap(), I(6));
+    state.set(*vid.get("have_supply_need").unwrap(), B(false));
+    state.set(*vid.get("carryFood").unwrap(), B(false));
+    state.set(*vid.get("rHasFood").unwrap(), B(true));
+    state.set(*vid.get("at").unwrap(), I(1));
 
 
     let plan = planner.plan(&state).unwrap();
@@ -33,20 +33,4 @@ fn main() {
     }
     println!("Planer finished successfully. Plan: {:?}", plan);
 
-
-    // for action in planner.plan {
-    //     match action.preconditions {
-    //         Some(p) => print!("if {} then ", p),
-    //         _ => ()
-    //     }
-    //     println!("run {}:",action.name);
-    //     for op in action.operators {
-    //         println!("\t{}({})", op.operator, op.arguments.iter().fold(String::new(), |acc,item| acc + &format!("{}, ", item)));
-    //     }
-    //     println!("\tExpecting state: {:?}", action.end_state.0);
-    // }
-    // match plan {
-    //     Ok(plan) => println!("Plan: {:?}", plan),
-    //     Err(e) => domain.print_parse_error(&e),
-    // }
 }

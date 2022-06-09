@@ -12,12 +12,13 @@ pub struct Node<'a, T:Copy> {
 }
 
 
-fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Error> where T: Copy + 
+fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<bool, Error> where T: Copy + 
     std::hash::Hash + 
     Default +
     std::cmp::PartialEq +
     std::cmp::PartialOrd +
     std::convert::From::<bool> +
+    std::convert::Into::<bool> +
     std::convert::From::<Literal> +
     std::fmt::Display + 
     std::ops::Sub<Output = T> + 
@@ -29,11 +30,11 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
     std::ops::Not<Output = T> {
         if let Some(p) = stmt.preconditions().expect("This statement can't have preconditions.") {
             match p.eval(state) {
-                Ok(v) => Ok(v),
+                Ok(v) => Ok(v.into()),
                 Err(e) => Err(e.into())
             }
         } else {
-            Ok(Literal::B(true).into())
+            Ok(true)
         }
 }
 
@@ -68,6 +69,7 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
         std::fmt::Display + 
         std::convert::Into::<i32> +
         std::convert::From::<bool> +
+        std::convert::Into::<bool> +
         std::convert::From::<Literal> +
         std::ops::Sub<Output = T> + 
         std::ops::Add<Output = T> + 
@@ -113,7 +115,7 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<T, Erro
                     // println!("Current state is {:?}", current.state);
                     // println!("gScore contains current.state? {}", gScore.contains_key(&current.state));
                     // println!("gScore.keys(): {:?}", gScore.keys());
-                    let tentative_gScore = gScore.get(&current.state).unwrap_or(&Literal::F(f32::INFINITY).into()).clone();
+                    let tentative_gScore = gScore.get(&current.state).unwrap_or(&i32::MAX).clone();
                     // println!("After {}({:?}) tentative_gScore is {}",current.task_name, current.state, tentative_gScore);
                     let mut new_state = current.state.clone();
                     if let Some(stmt) = task.effects()? {
