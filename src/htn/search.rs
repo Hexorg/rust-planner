@@ -115,7 +115,7 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<bool, E
                     // println!("Current state is {:?}", current.state);
                     // println!("gScore contains current.state? {}", gScore.contains_key(&current.state));
                     // println!("gScore.keys(): {:?}", gScore.keys());
-                    let tentative_gScore = gScore.get(&current.state).unwrap_or(&i32::MAX).clone();
+                    let tentative_gScore = gScore.get(&current.state).unwrap_or(&i32::MAX).clone() + cost;
                     // println!("After {}({:?}) tentative_gScore is {}",current.task_name, current.state, tentative_gScore);
                     let mut new_state = current.state.clone();
                     if let Some(stmt) = task.effects()? {

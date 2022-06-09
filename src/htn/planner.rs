@@ -170,8 +170,9 @@ impl Planner {
             std::ops::Not<Output = T> {
 
         let cost = stmt.cost()?.and_then(|e| Some(e.eval(state).unwrap())).unwrap_or_default();
-        let time = self.task_duration.get(stmt.name()?).unwrap_or(&0);
-        Ok(<T as Into<i32>>::into(cost) * time)
+        let time = self.task_duration.get(stmt.name()?).unwrap_or(&1);
+        let r = <T as Into<i32>>::into(cost) * time;
+        Ok(r)
     }
 
     pub fn get_task_and_cost<T>(&self, task:&str, state:&State<T>) -> Result<(&Stmt, i32), Error> 
@@ -223,11 +224,11 @@ impl Planner {
             return Ok(true)
         }
 
-        println!("{:>depth$}Figuring out plan for {}", ' ', task.name()?, depth=depth);
+        // println!("{:>depth$}Figuring out plan for {}", ' ', task.name()?, depth=depth);
 
         if let Some((task_plan, _task_plan_cost)) = Astar(state.clone(), task, |f| Literal::F(4.0).into(), self)? {
             if task_plan.len() > 0 {
-                println!("{:>depth$}To run {} we ned to run (cost {}) {:?}", ' ', task.name()?, _task_plan_cost, task_plan, depth=depth);
+                // println!("{:>depth$}To run {} we ned to run (cost {}) {:?}", ' ', task.name()?, _task_plan_cost, task_plan, depth=depth);
             }
             for subtask in task_plan {
                 if !self.run_astar(plan, state, self.domain.get_task(&subtask).unwrap(), depth+2)? {
@@ -246,9 +247,9 @@ impl Planner {
                 }
                 if let Some((mut method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
                     let method_name = method_plan.pop().unwrap();
-                    println!("{:>depth$}{} is composite -> Choosing to run {}", ' ', task.name()?, method_name, depth=depth);
+                    // println!("{:>depth$}{} is composite -> Choosing to run {}", ' ', task.name()?, method_name, depth=depth);
                     if method_plan.len() > 0 {
-                        println!("{:>depth$}To run {} we ned to run (cost {}) {:?}", ' ', method_name, _method_plan_cost.0, method_plan, depth=depth);
+                        // println!("{:>depth$}To run {} we ned to run (cost {}) {:?}", ' ', method_name, _method_plan_cost.0, method_plan, depth=depth);
                     }
                     for subtask in method_plan {
                         if !self.run_astar(plan, state, self.domain.get_task(&subtask).unwrap(), depth+2)? {
@@ -263,11 +264,11 @@ impl Planner {
                         }    
                     }
                 } else {
-                    println!("{:>depth$}{} is composite, but we can't run any methods. Abort.", ' ', task.name()?, depth=depth);
+                    // println!("{:>depth$}{} is composite, but we can't run any methods. Abort.", ' ', task.name()?, depth=depth);
                     plan.push(PlannedTask::fail(task))
                 }
             } else {
-                println!("{:>depth$} Processing {}'s operators...", ' ', task.name()?, depth=depth);
+                // println!("{:>depth$} Processing {}'s operators...", ' ', task.name()?, depth=depth);
                 let mut planned_task = PlannedTask::from(task);
                 let mut have_more_data = false;
                 for op in task.expressions()? {
