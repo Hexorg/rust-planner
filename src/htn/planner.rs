@@ -135,21 +135,12 @@ pub struct Planner {
 
 
 impl Planner {
-// where T: Clone + 
-    // std::hash::Hash + 
-    // std::cmp::PartialEq +
-    // std::cmp::PartialOrd +
-    // std::cmp::Ord + 
-    // std::convert::From::<f32> +
-    // std::fmt::Debug + 
-    // std::fmt::Display + 
-    // std::ops::Sub<Output = T> + 
-    // std::ops::Add<Output = T> + 
-    // std::ops::Div<Output = T> + 
-    // std::ops::Mul<Output = T> +
-    // std::ops::BitOr<Output = T> + 
-    // std::ops::BitAnd<Output = T> + 
-    // std::ops::Not<Output = T>{    
+    pub fn new_state<T:Copy+Default>(&self) -> State<T> { 
+        State::new(self.domain.variable_ids.len())
+    }
+    pub fn set_cost(&mut self, stmt:&Stmt, cost:f32) {
+        self.task_duration.insert(String::from(stmt.name().unwrap()), cost);
+    }
     pub fn get_cost<T>(&self, stmt:&Stmt, state:&State<T>) -> Result<i32, Error> 
         where T: Copy + std::hash::Hash + Default + 
             std::fmt::Debug + 

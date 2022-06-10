@@ -16,8 +16,7 @@ fn main() {
     // print!("{:?}", domain);
     let planner = Planner::new(domain);
     let vid = &planner.domain.variable_ids;
-    let state_size = planner.domain.variable_ids.len();
-    let mut state = State::<StateType>::new(state_size);
+    let mut state = planner.new_state();
     use StateType::*;
     state.set(*vid.get("hunger").unwrap(), I(6));
     state.set(*vid.get("have_supply_need").unwrap(), B(false));
