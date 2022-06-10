@@ -58,7 +58,8 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<bool, E
     }
 
     /// Outputs a plan UP TO goal, but not including goal
-    pub fn Astar<'a, T, F>(start:State<T>, goal:&'a Stmt, heuristic: F, planner:&'a Planner) -> Result<Option<(Vec<&'a str>, i32)>, Error> where  F: Fn(&State<T>)->i32,
+    pub fn Astar<'a, T, F>(start:State<T>, goal:&'a Stmt, heuristic: F, planner:&'a Planner) -> Result<Option<(Vec<&'a str>, i32)>, Error> 
+        where  F: Fn(&State<T>)->i32,
         T: Copy + Default + 
         std::hash::Hash + 
         std::cmp::PartialEq +
@@ -96,7 +97,6 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<bool, E
 
         // println!("Start state is {:?}", start);
         
-        let all_tasks:Vec<&str> = planner.domain.get_all_task_names();
         while let Some((current, total_plan_cost)) = openSet.pop() {
             // println!("Looking at state that resulted from calling {}: {:?}. Cost to reach: {}", current.task_name, current.state, total_plan_cost.0);
             if are_preconditions_satisfied(goal, &current.state).unwrap() == Literal::B(true).into() {
@@ -106,7 +106,7 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<bool, E
                 return Ok(Some((reconstruct_path(cameFrom, current.task_name), total_plan_cost.0)));
             }
             // println!("Getting neighbors of {}", current.method_name);
-            let neighbors = &all_tasks;
+            let neighbors = planner.domain.get_enablers_of(current.task_name);
             for task_name in neighbors {
                 // println!("Can we run {}? ", task_name);
                 let (task, cost) = planner.get_task_and_cost(task_name, &current.state)?;

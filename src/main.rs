@@ -13,7 +13,7 @@ fn main() {
         Ok(domain) => domain,
         Err(e) => {eprintln!("{}", e); panic!()},
     };
-    print!("{:?}", domain);
+    // print!("{:?}", domain);
     let planner = Planner::new(domain);
     let vid = &planner.domain.variable_ids;
     let state_size = planner.domain.variable_ids.len();

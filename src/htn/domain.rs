@@ -5,12 +5,12 @@ use super::parser;
 
 /// Structure that holds parsed out AST as well as optimization data
 pub struct Domain {
-    pub tasks: Vec<Stmt>,
-    task_ids: HashMap<String, usize>,
-    pub variable_ids: HashMap<String, usize>,
-    main_idx: usize,
     pub filepath: String,
-    pub content: String,
+    pub tasks: Vec<Stmt>,
+    pub variable_ids: HashMap<String, usize>,
+    neighbors: HashMap<String, Vec<String>>,
+    task_ids: HashMap<String, usize>,
+    main_id: usize,
 }
 
 #[derive(Debug)]
@@ -80,40 +80,29 @@ impl std::fmt::Debug for Domain {
 }
 
 impl Domain {
-    // fn create_links(tasks:&Vec<Stmt>) -> HashMap<Rc<String>, Vec<Rc<String>>> {
-    //     let mut result = HashMap::new();
-    //     for task in tasks.iter() {
-    //         let mut neighbors:Vec<Rc<String>> = Vec::new();
-    //         for other in tasks.iter() {
-    //             if task.name() != other.name() {
-    //                 let affects = other.affects();
-    //                 task.for_each_method(&mut |method| if affects.intersection(&method.depends()).count() > 0 {
-    //                     println!("{} enables {}.{}", other_name, task_name, method.name().unwrap());
-    //                     neighbors.push(method.name()?);
-    //                     Ok(())
-    //                 } else { Ok(())});
-    //                 // if task effects other's preconditions
-    //                 if affects.intersection(&task.depends()).count() > 0 {
-    //                     neighbors.push(other_name.clone());
-    //                     println!("{} enables {}", other_name, task_name);
-    //                 }
-    //             }
-    //         }
-    //         result.insert(task_name.clone(), neighbors);
-    //         task.for_each_method(&mut |method| {
-    //             let depends = method.depends();
-    //             let mut neighbors:Vec<Rc<String>> = Vec::new();
-    //             for (other_name, other) in tasks.iter() {
-    //                 if other.affects().intersection(&depends).count() > 0 {
-    //                     neighbors.push(other_name.clone())
-    //                 }
-    //             }
-    //             result.insert(method.name().unwrap(), neighbors);
-    //             Ok(())
-    //         });
-    //     }
-    //     result
-    // }
+    fn get_neighbors(tasks:&Vec<Stmt>) -> Result<HashMap<String, Vec<String>>, Error> {
+        let mut result = HashMap::new();
+        for (i, x) in tasks.iter().enumerate() {
+            let writes = if let Some(e) = x.effects()? {
+                e.expressions()?.fold(HashSet::new(), |mut acc,item| {if let Some(w) = item.get_writes() { acc.insert(w); } acc})
+            } else {
+                HashSet::new()
+            };
+            let mut to_vec = Vec::new();
+            for (iy, y) in tasks.iter().enumerate() {
+                if iy != i {
+                    if let Some(p) = y.preconditions()? {
+                        if writes.intersection(&p.get_reads()).count() > 0 {
+                            to_vec.push(String::from(y.name()?));
+                            
+                        }
+                    }
+                }
+            }
+            result.insert(String::from(x.name()?), to_vec);
+        }
+        Ok(result)
+    }
 
     fn variable_strings_to_ids(tasks:&mut Vec<Stmt>) -> Result<HashMap<String, usize>, Error> {
         let mut state_variables = HashMap::new();
@@ -143,6 +132,9 @@ impl Domain {
         for task in tasks.iter_mut() {
             if let Some(preconditions) = task.preconditions_mut()? {
                 preconditions.set_var_ids(&state_variables);
+            }
+            if let Some(cost) = task.cost_mut()? {
+                cost.set_var_ids(&state_variables)
             }
             if task.is_composite()? {
                 for method in task.methods_mut()? {
@@ -175,28 +167,30 @@ impl Domain {
         Ok(state_variables)
     }
 
-    pub fn print_parse_error(&self, error: &parser::Error) {
-        Parser::print_parse_errors(error, &self.content, &self.filepath);
-    }
-
     pub fn get_task(&self, name:&str) -> Option<&Stmt> {
-        if let Some(idx) = self.task_ids.get(name) {
-            self.tasks.get(*idx)
+        if let Some(id) = self.task_ids.get(name) {
+            self.tasks.get(*id)
         } else {
             None
         }
+        
     }
 
-    
-
-
     pub fn get_main(&self) -> &Stmt {
-        self.tasks.get(self.main_idx).unwrap()
+        self.tasks.get(self.main_id).unwrap()
     } 
 
+    pub fn get_enablers_of(&self, key:&str) -> Vec<&str> {
+        if let Some(v) = self.neighbors.get(key) {
+            let r:Vec<&str> = v.iter().map(|i| i.as_str()).collect();
+            r
+        } else {
+            self.get_all_task_names().collect()
+        }
+    }
 
-    pub fn get_all_task_names(&self) -> Vec<&str> {
-        self.task_ids.keys().map(|key| key.as_str()).collect()
+    pub fn get_all_task_names(&self) -> impl Iterator<Item = &str> {
+        self.task_ids.keys().map(|key| key.as_str())
     }
 
     pub fn from_file(filepath:&str) -> Result<Domain, Error> {
@@ -204,17 +198,18 @@ impl Domain {
         let mut tasks = Parser::parse(content.as_str())?;
         // errors.iter().for_each(|e| Parser::print_parse_errors(e, content.as_str(), filepath));
         let mut task_ids = HashMap::new();
-        let mut main_idx = None;
+        let mut main_id = None;
         for (idx, stmt) in tasks.iter().enumerate() {
             let name = stmt.name()?;
             if name.eq("Main") {
-                main_idx = Some(idx);
+                main_id = Some(idx);
             }
             task_ids.insert(String::from(name), idx);
             
         }
+        let neighbors = Domain::get_neighbors(&tasks)?;
         let variable_ids = Domain::variable_strings_to_ids(&mut tasks)?;
-        let domain = Domain{tasks, task_ids, main_idx:main_idx.expect("Domain must contain 'Main' task"), variable_ids, content, filepath:String::from(filepath)};
+        let domain = Domain{tasks, task_ids, main_id:main_id.expect("Domain must contain 'Main' task"), variable_ids, filepath:String::from(filepath), neighbors};
         Ok(domain)
     }
 }

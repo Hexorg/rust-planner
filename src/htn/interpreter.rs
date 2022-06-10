@@ -21,6 +21,12 @@ impl<T:Copy + Default> State<T> {
     }
 }
 
+impl<T:std::ops::Sub<Output = T> + Default + std::convert::Into<i32>+Copy> State<T> {
+    fn manhattan(&self, other:&Self) -> i32 {
+        self.0.iter().zip(other.0.iter()).fold(T::default(), |acc, (l, r)| *l-*r).into()
+    }
+}
+
 // impl<T:std::hash::Hash> std::hash::Hash for State<T> {
 //     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
 //         self.0.iter().for_each(|i|i.hash(state));
@@ -170,6 +176,7 @@ impl std::ops::Sub for StateType {
         match (self, rhs) {
             (StateType::I(i), StateType::I(ri)) => I(i-ri),
             (StateType::F(f), StateType::F(rf)) => F(f-rf),
+            (StateType::B(b), StateType::B(rb)) => if b == rb { I(0) } else { I(1) }
             _ => panic!("Attempt to subtract unsupported types"),
         }
     }

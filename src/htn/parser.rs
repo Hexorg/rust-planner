@@ -18,7 +18,7 @@ impl fmt::Debug for Error {
 }
 impl std::error::Error for Error { }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Literal {
     I(i32),
     F(f32),
@@ -665,6 +665,16 @@ impl Stmt {
     }
 
     pub fn cost(&self) -> Result<Option<&Expr>, Error> {
+        match self {
+            Self::Method{cost:Some(cost),..} | 
+            Self::Task{cost:Some(cost),..} => Ok(Some(cost)),
+            Self::Method{cost:None,..} | 
+            Self::Task{cost:None,..} => Ok(None),
+            _ => Err(self.to_err(String::from("Statement is not a Task or a Method.")))
+        }
+    }
+
+    pub fn cost_mut(&mut self) -> Result<Option<&mut Expr>, Error> {
         match self {
             Self::Method{cost:Some(cost),..} | 
             Self::Task{cost:Some(cost),..} => Ok(Some(cost)),

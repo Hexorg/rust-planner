@@ -20,7 +20,7 @@ task Eat(carryFood):
 effects:
 	carryFood = false
 
-task Forage(!carryFood) cost 5:
+task Forage(!carryFood) cost 10:
 	goto(berries)
 	target = chooseFood()
 	pickup(target)

@@ -128,7 +128,7 @@ impl<'a> PlannedTask<'a> {
 
 pub struct Planner {
     pub domain:Domain,
-    task_duration:HashMap<String, i32>,
+    task_duration:HashMap<String, f32>,
 }
 
 
@@ -170,8 +170,8 @@ impl Planner {
             std::ops::Not<Output = T> {
 
         let cost = stmt.cost()?.and_then(|e| Some(e.eval(state).unwrap())).unwrap_or_default();
-        let time = self.task_duration.get(stmt.name()?).unwrap_or(&1);
-        let r = <T as Into<i32>>::into(cost) * time;
+        let time = self.task_duration.get(stmt.name()?).unwrap_or(&1.0);
+        let r = <T as Into<i32>>::into(cost) + (10.0*time) as i32;
         Ok(r)
     }
 
