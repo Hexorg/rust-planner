@@ -425,62 +425,62 @@ impl Expr {
         vars
     }
 
-    pub fn eval_static(&self) -> Result<Option<Literal>, Error> {
-        match self {
-            Expr::Binary(left, op, right) => { 
-                let left = left.eval_static()?;
-                let right = right.eval_static()?;
-                match (&op.t, left, right) {
-                    (TokenData::EqualsEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l == r))),
-                    (TokenData::EqualsEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l == r))),
-                    (TokenData::EqualsEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l == r))),
-                    (TokenData::Minus, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l - r))),
-                    (TokenData::Minus, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l - r))),
-                    (TokenData::Plus, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l + r))),
-                    (TokenData::Plus, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l + r))),
-                    (TokenData::Slash, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l / r))),
-                    (TokenData::Slash, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l / r))),
-                    (TokenData::Star, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l * r))),
-                    (TokenData::Star, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l * r))),
-                    (TokenData::Greater, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l > r))),
-                    (TokenData::Greater, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l > r))),
-                    (TokenData::Greater, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l > r))),
-                    (TokenData::Smaller, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l < r))),
-                    (TokenData::Smaller, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l < r))),
-                    (TokenData::Smaller, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l < r))),
-                    (TokenData::GreaterOrEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l >= r))),
-                    (TokenData::GreaterOrEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l >= r))),
-                    (TokenData::GreaterOrEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l >= r))),
-                    (TokenData::SmallerOrEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l <= r))),
-                    (TokenData::SmallerOrEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l <= r))),
-                    (TokenData::SmallerOrEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l <= r))),
-                    (TokenData::NotEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l != r))),
-                    (TokenData::NotEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l != r))),
-                    (TokenData::NotEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l != r))),
-                    (TokenData::Or, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l | r))),
-                    (TokenData::Or, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l | r))),
-                    (TokenData::And, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l & r))),
-                    (TokenData::And, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l | r))),
-                    _ => Err(self.to_err(String::from("Unsupported operation. Can not evaluate statically."))),
-                }
-            },
-            Expr::Grouping(g, _) => g.eval_static(),
-            Expr::Literal(l, _) => Ok(Some(l.clone())),
-            Expr::Variable(t) => Err(self.to_err(String::from("Expression contains variables. Can't evaluate statically."))),
-            Expr::Unary(op, e) => if let TokenData::Not = op.t {
-                if let Some(Literal::B(b)) = e.eval_static()? {
-                    Ok(Some(Literal::B(!b)))
-                } else {
-                    Err(self.to_err(String::from("Unable to statically invert a non-boolean literal.")))
-                }
-            } else {
-                Err(self.to_err(String::from("Unexpected unary operator.")))
-            },
-            Expr::Assignment(_, e) => e.eval_static(),
-            Expr::Call(_, _) => Err(self.to_err(String::from("Expression contains Calls. Can't evaluate statically."))),
-            Expr::Noop(_) => Ok(None),
-        }
-    }
+    // pub fn eval_static(&self) -> Result<Option<Literal>, Error> {
+    //     match self {
+    //         Expr::Binary(left, op, right) => { 
+    //             let left = left.eval_static()?;
+    //             let right = right.eval_static()?;
+    //             match (&op.t, left, right) {
+    //                 (TokenData::EqualsEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l == r))),
+    //                 (TokenData::EqualsEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l == r))),
+    //                 (TokenData::EqualsEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l == r))),
+    //                 (TokenData::Minus, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l - r))),
+    //                 (TokenData::Minus, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l - r))),
+    //                 (TokenData::Plus, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l + r))),
+    //                 (TokenData::Plus, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l + r))),
+    //                 (TokenData::Slash, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l / r))),
+    //                 (TokenData::Slash, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l / r))),
+    //                 (TokenData::Star, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l * r))),
+    //                 (TokenData::Star, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l * r))),
+    //                 (TokenData::Greater, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l > r))),
+    //                 (TokenData::Greater, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l > r))),
+    //                 (TokenData::Greater, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l > r))),
+    //                 (TokenData::Smaller, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l < r))),
+    //                 (TokenData::Smaller, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l < r))),
+    //                 (TokenData::Smaller, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l < r))),
+    //                 (TokenData::GreaterOrEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l >= r))),
+    //                 (TokenData::GreaterOrEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l >= r))),
+    //                 (TokenData::GreaterOrEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l >= r))),
+    //                 (TokenData::SmallerOrEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l <= r))),
+    //                 (TokenData::SmallerOrEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l <= r))),
+    //                 (TokenData::SmallerOrEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l <= r))),
+    //                 (TokenData::NotEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l != r))),
+    //                 (TokenData::NotEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l != r))),
+    //                 (TokenData::NotEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l != r))),
+    //                 (TokenData::Or, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l | r))),
+    //                 (TokenData::Or, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l | r))),
+    //                 (TokenData::And, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l & r))),
+    //                 (TokenData::And, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l | r))),
+    //                 _ => Err(self.to_err(String::from("Unsupported operation. Can not evaluate statically."))),
+    //             }
+    //         },
+    //         Expr::Grouping(g, _) => g.eval_static(),
+    //         Expr::Literal(l, _) => Ok(Some(l.clone())),
+    //         Expr::Variable(t) => Err(self.to_err(String::from("Expression contains variables. Can't evaluate statically."))),
+    //         Expr::Unary(op, e) => if let TokenData::Not = op.t {
+    //             if let Some(Literal::B(b)) = e.eval_static()? {
+    //                 Ok(Some(Literal::B(!b)))
+    //             } else {
+    //                 Err(self.to_err(String::from("Unable to statically invert a non-boolean literal.")))
+    //             }
+    //         } else {
+    //             Err(self.to_err(String::from("Unexpected unary operator.")))
+    //         },
+    //         Expr::Assignment(_, e) => e.eval_static(),
+    //         Expr::Call(_, _) => Err(self.to_err(String::from("Expression contains Calls. Can't evaluate statically."))),
+    //         Expr::Noop(_) => Ok(None),
+    //     }
+    // }
 
     pub fn set_var_ids(&mut self, map: &HashMap<String, usize>) {
         match self {
@@ -715,10 +715,11 @@ impl Stmt {
         }
     }
 
-    pub fn is_include(&self) -> Option<&Expr> {
+    pub fn is_include(&self) -> Result<Option<&String>, Error> {
         match self {
-            Self::Include(s) => Some(s),
-            _ => None,
+            Self::Include(Expr::Literal(Literal::S(s), _)) => Ok(Some(s)),
+            Self::Include(_) => Err(self.to_err(String::from("Only string literals are allowed in the include statement"))),
+            _ => Ok(None),
         }
     }
 
@@ -1173,7 +1174,7 @@ impl Parser {
         while parser.idx + 1 < parser.tokens.len() {
             match parser.statement(None) {
                 Ok(s) => parser.statements.push(s),
-                Err(e) => parser.errors.push(e)
+                Err(e) => {parser.errors.push(e); parser.error_recover()}
             }
         }
         if parser.errors.len() > 0 {

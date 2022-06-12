@@ -200,10 +200,8 @@ impl Domain {
         for stmt in ast {
             if stmt.is_task() {
                 tasks.push(stmt)
-            } else if let Some(e) =  stmt.is_include() {
-                if let Some(Literal::S(s)) = e.eval_static()? {
+            } else if let Some(s) =  stmt.is_include()? {
                     tasks.extend(Domain::get_tasks(s.as_str())?)
-                }
             }
         }
         Ok(tasks)
