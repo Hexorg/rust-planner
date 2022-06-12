@@ -161,6 +161,7 @@ impl Planner {
             std::ops::Not<Output = T> {
 
         let cost = stmt.cost()?.and_then(|e| Some(e.eval(state).unwrap())).unwrap_or_default();
+        // println!("{} cost is {:?}", stmt.name()?, stmt.cost()?);
         let time = self.task_duration.get(stmt.name()?).unwrap_or(&1.0);
         let r = <T as Into<i32>>::into(cost) + (10.0*time) as i32;
         Ok(r)
@@ -233,9 +234,10 @@ impl Planner {
                 for method in task.methods()? {
                     if let Some((mut method_plan, method_plan_cost)) = Astar(state.clone(), method, |f| 4, self)? {
                         method_plan.push(method.name()?);
-                        method_plans.push(method_plan, Reverse(method_plan_cost));
+                        method_plans.push(method_plan, Reverse(method_plan_cost+self.get_cost(method, state)?));
                     }
                 }
+                // println!("Method plans: {:?}", method_plans);
                 if let Some((mut method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
                     let method_name = method_plan.pop().unwrap();
                     // println!("{:>depth$}{} is composite -> Choosing to run {}", ' ', task.name()?, method_name, depth=depth);

@@ -131,8 +131,8 @@ impl std::cmp::PartialOrd for StateType {
         match (self, other) {
             (StateType::I(i), StateType::I(oi)) => Some(i.cmp(oi)),
             (StateType::B(b), StateType::B(bo)) => Some(b.cmp(bo)),
-            (StateType::F(f), StateType::F(fo)) if f.is_normal() && fo.is_normal() => f.partial_cmp(fo),
-            _ => panic!("Can't compare different types")
+            (StateType::F(f), StateType::F(fo)) if f.is_finite() && fo.is_finite() => f.partial_cmp(fo),
+            _ => panic!("Can't compare different types: {:?} and {:?}", self, other)
         }
     }
 }
@@ -143,7 +143,7 @@ impl std::cmp::Ord for StateType {
         match (self, other) {
             (StateType::I(i), StateType::I(oi)) => i.cmp(oi),
             (StateType::B(b), StateType::B(bo)) => b.cmp(bo),
-            (StateType::F(f), StateType::F(fo)) if f.is_normal() && fo.is_normal() => f.partial_cmp(fo).unwrap(),
+            (StateType::F(f), StateType::F(fo)) if f.is_finite() && fo.is_finite() => f.partial_cmp(fo).unwrap(),
             _ => panic!("Can't compare different types")
         }
     }

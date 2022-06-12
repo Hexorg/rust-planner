@@ -18,11 +18,11 @@ fn main() {
     let vid = &planner.domain.variable_ids;
     let mut state = planner.new_state();
     use StateType::*;
-    state.set(*vid.get("hunger").unwrap(), F(1.3));
-    state.set(*vid.get("have_supply_need").unwrap(), B(true));
-    state.set(*vid.get("carryFood").unwrap(), B(false));
-    state.set(*vid.get("rHasFood").unwrap(), B(true));
-    state.set(*vid.get("at").unwrap(), I(0));
+    state.set(*vid.get("hunger").unwrap(), F(0.0));
+    // state.set(*vid.get("have_supply_need").unwrap(), B(false));
+    // state.set(*vid.get("have_target_stone").unwrap(), B(false));
+    state.set(*vid.get("rHasFood").unwrap(), B(false));
+    // state.set(*vid.get("at").unwrap(), I(0));
 
 
     let plan = planner.plan(&state).unwrap();
