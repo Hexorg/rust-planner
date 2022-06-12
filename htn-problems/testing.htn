@@ -1,7 +1,7 @@
-include "htn-prokblems/sample.htn"
+include "htn-problems/sample.htn"
 
 task Main:
-    method Run1(+cnd1):
+    method Run1(cnd1):
         op1()
         op1()
     method Run2(cnd2):
@@ -10,7 +10,7 @@ task Main:
     method Run_Task(cnd3):
         Task2()
 
-task Task2(+cnd4):
+task Task2(cnd4):
     op3()
 effects:
     cnd4 = false

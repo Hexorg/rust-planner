@@ -10,13 +10,14 @@ pub struct Domain {
     pub variable_ids: HashMap<String, usize>,
     neighbors: HashMap<String, Vec<String>>,
     task_ids: HashMap<String, usize>,
-    main_id: usize,
+    main_id: Option<usize>,
 }
 
 #[derive(Debug)]
 pub enum Error {
     IO(String, std::io::Error),
-    Parser(String, Vec<parser::Error>)
+    Parser(String, Vec<parser::Error>),
+    Domain(String, Box<Error>),
 }
 
 
@@ -24,6 +25,7 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::IO(s, e) => write!(f, "{}: {}", s, e),
+            Self::Domain(s, e) => write!(f, "In file included from {}:\n{}", s, e),
             Self::Parser(filepath, es) => {
                 let htn_source = fs::read_to_string(filepath).unwrap();
                 let mut lines = htn_source.lines();
@@ -48,7 +50,16 @@ impl Error {
     fn set_path(&mut self, filename:&str) {
         match self {
             Error::IO(ref mut f, _) |
+            Error::Domain(ref mut f, _) |
             Error::Parser(ref mut f, _) => f.extend(filename.chars())
+        }
+    }
+
+    fn has_path(&self) -> bool {
+        match self {
+            Error::IO(p, _) | 
+            Error::Domain(p, _) |
+            Error::Parser(p, _) => p.len() > 0
         }
     }
 }
@@ -201,7 +212,7 @@ impl Domain {
     }
 
     pub fn get_main(&self) -> &Stmt {
-        self.tasks.get(self.main_id).unwrap()
+        self.tasks.get(self.main_id.unwrap()).unwrap()
     } 
 
     pub fn get_enablers_of(&self, key:&str) -> Vec<&str> {
@@ -217,7 +228,7 @@ impl Domain {
         self.task_ids.keys().map(|key| key.as_str())
     }
 
-    fn get_tasks(filepath:&str) -> Result<Vec<Stmt>, Error> {
+    pub fn wrapper(filepath:&str) -> Result<Domain, Error> {
         let content = fs::read_to_string(filepath)?;
         let ast = Parser::parse(content.as_str())?;
         let mut tasks = Vec::<Stmt>::new();
@@ -225,34 +236,37 @@ impl Domain {
             if stmt.is_task() {
                 tasks.push(stmt)
             } else if let Some(s) =  stmt.is_include()? {
-                    tasks.extend(Domain::get_tasks(s.as_str())?)
+                let subdomain = match Domain::from_file(s.as_str()) {
+                    Ok(r) => Ok(r),
+                    Err(e) => Err(Error::Domain(String::new(), Box::new(e))),
+                }?;
+                tasks.extend(subdomain.tasks);
             }
         }
-        Ok(tasks)
-    }
 
-    pub fn wrapper(filepath:&str) -> Result<Domain, Error> {
-        let mut tasks = Domain::get_tasks(filepath)?;
         let mut task_ids = HashMap::new();
         let mut main_id = None;
         for (idx, stmt) in tasks.iter().enumerate() {
             let name = stmt.name()?;
-            if name.eq("Main") {
+            if name == "Main" {
                 main_id = Some(idx);
+            } else {
+                dbg!(name);
             }
-            task_ids.insert(String::from(name), idx);
-            
+            if let Some(t) = task_ids.insert(String::from(name), idx) {
+                return Err(Error::Parser(String::new(), vec![stmt.to_err(String::from("Multiple definitions of this task."))]))
+            }
         }
         let neighbors = Domain::get_neighbors(&tasks)?;
         let variable_ids = Domain::variable_strings_to_ids(&mut tasks)?;
-        let domain = Domain{tasks, task_ids, main_id:main_id.expect("Domain must contain 'Main' task"), variable_ids, filepath:String::from(filepath), neighbors};
+        let domain = Domain{tasks, task_ids, main_id, variable_ids, filepath:String::from(filepath), neighbors};
         Ok(domain)
     }
-
-    pub fn from_file(filepath:&str) -> Result<Domain, Error> {
+       
+    pub fn from_file(filepath:&str) -> Result<Domain, Error> {   
         match Domain::wrapper(filepath) {
             Ok(r) => Ok(r),
-            Err(mut e) => {e.set_path(filepath); Err(e)} 
+            Err(mut e) => {if !e.has_path() { e.set_path(filepath); } Err(e)} 
         }
     }
 }

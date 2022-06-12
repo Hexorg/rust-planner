@@ -1,2 +1,2 @@
-task Wait(+cnd4):
+task Wait(cnd4):
     wait()
