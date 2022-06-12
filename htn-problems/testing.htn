@@ -1,66 +1,14 @@
 task Main:
-    method FindTrunk(WsTrunkHealth == 0):
-        UprootTrunk()
-        Main()
-    method Attack(WsCanSeeEnemy): # name(conditions)
-        AttackEnemy()
-        Main()
-    else: # syntactic sugar for "method bla(!WsCanSeeEnemy)"
-        CheckBridge()
-        Main()
-    method Wait:
-        wait()
-        Main()
+    method Run1(cnd1):
+        op1()
+        op1()
+    method Run2(cnd2):
+        op2()
+        op2()
+    method Run_Task(cnd3):
+        Task2()
 
-task AttackEnemy:
-    method AttackWithTrunk(WsTrunkHealth > 0):
-        NavigateToEnemy()
-        DoTrunkSlam()
-
-task DoTrunkSlam(WsTrunkHealth > 0):
-    DoTrunkSlamOperator()
+task Task2(cnd4):
+    op3()
 effects:
-    WsTrunkHealth -= 1
-
-task CheckBridge:
-    NavigateToBridge()
-    LookForEnemy()
-
-task ChooseBridgeToCheck:
-    target = chooseBridge()
-effects:
-    targetIsBridge = true 
-
-task LookForEnemy(atBridge):
-    lookForEnemy()
-effects:
-    WsCanSeeEnemy = true
-
-
-task NavigateToBridge(targetIsBridge == true):
-    NavigateTo(target)
-effects:
-    atBridge = true
-
-task FindTrunk:
-    target = FindTrunkOperator() # Operator results can be stored in blackboard
-effects:
-    targetIsTrunk = true # not needed if the sequence is always the same
-
-task NavigateToEnemy(WsCanSeeEnemy):
-    NavigateTo(enemy) # blackboard is prefilled with certain knowledge
-
-
-task NavigateToTrunk(targetIsTrunk):
-    NavigateTo(target)
-effects:
-    atTrunk = true
-
-
-task UprootTrunk(atTrunk & targetIsTrunk):
-    UprootTrunkOperator(target)
-effects:
-    WsTrunkHealth = 3
-    targetIsTrunk = false
-    atTrunk = false
-    
+    cnd4 = false

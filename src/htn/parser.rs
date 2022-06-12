@@ -169,11 +169,6 @@ enum DepthSeparator {
 
 pub struct Lexer { }
 
-pub struct Parser {
-    idx: usize,
-    tokens: Vec<Token>,
-}
-
 impl Lexer {
     pub fn tokenize(htn_source: &str) -> Result<Vec<Token>, Error> {
         use TokenData::*;
@@ -322,9 +317,6 @@ impl Lexer {
                                 return Err(Error{line, col, message:String::from("Tabs and spaces can't be used together")})
                             }
                             tab_depth += 1; // tab_depth counts amount of spaces seen first. Then on the first non-whitespace character we convert amount of spaces to actual tab-depth
-                        }
-                        if if let Some(next_char) = it.peek() { next_char.is_alphanumeric() } else { false } {
-                            r.push(Token{line, col, len:1, t:Label(String::new())})
                         }
                     },
                     _ => (),
@@ -597,7 +589,8 @@ impl std::fmt::Display for StmtFormatter<'_> {
             Stmt::Task {name, preconditions, cost, body, ..} |
             Stmt::Method {name, preconditions, cost, body,..} => {
                 write!(f, "{:>lc$}: {:>depth$}", self.stmt.line_no(), ' ', depth=self.depth, lc=self.max_line_count)?;
-                write!(f, "TASK {}", name.string)?;
+                if let Stmt::Task{..} = self.stmt { write!(f, "TASK ") } else { write!(f, "METHOD ")}?;
+                write!(f, "{}", name.string)?;
                 if let Some(p) = preconditions {
                     write!(f, "({})", p)?;
                 }
@@ -812,6 +805,13 @@ impl Stmt {
     }
 
 
+}
+
+pub struct Parser {
+    idx: usize,
+    tokens: Vec<Token>,
+    statements: Vec<Stmt>,
+    errors: Vec<Error>
 }
 
 macro_rules! perror {
@@ -1105,7 +1105,7 @@ impl Parser {
             {Ok(Stmt::Include(expr))}, 
             "Expected new line after expression.")
     }
-    fn statement(&mut self, parent:Option<&str>) -> Result<Stmt, Error> {
+    fn statement(&mut self, parent:Option<&str>)-> Result<Stmt, Error> {
         // println!("When Parsing a new statement, next token is {}.", self.tokens[self.idx]);
         let r = if let TokenData::Task = self.tokens[self.idx].t {
             self.idx += 1;
@@ -1165,23 +1165,21 @@ impl Parser {
         }
     }
     pub fn parse(htn_source: &str) -> Result<Vec<Stmt>, Vec<Error>> {
-        let mut ast = Vec::<Stmt>::new();
-        let mut errors = Vec::<Error>::new();
         let mut parser = match Lexer::tokenize(htn_source) {
-            Ok(tokens) => Parser{idx:0, tokens},
-            Err(e) => { errors.push(e); return Err(errors); }
+            Ok(tokens) => Parser{idx:0, tokens, statements:Vec::new(), errors:Vec::new()},
+            Err(e) => { return Err(vec![e]); }
         };
         // Parser::print_tokens(&parser.tokens);
         while parser.idx + 1 < parser.tokens.len() {
             match parser.statement(None) {
-                Err(e) => {errors.push(e); parser.error_recover(); },
-                Ok(s) => ast.push(s)
+                Ok(s) => parser.statements.push(s),
+                Err(e) => parser.errors.push(e)
             }
         }
-        if errors.len() > 0 {
-            Err(errors)
+        if parser.errors.len() > 0 {
+            Err(parser.errors)
         } else {
-            Ok(ast)
+            Ok(parser.statements)
         }
     }
 }
