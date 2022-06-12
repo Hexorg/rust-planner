@@ -15,17 +15,41 @@ pub struct Domain {
 
 #[derive(Debug)]
 pub enum Error {
-    IO(std::io::Error),
-    Parser(Vec<parser::Error>)
+    IO(String, std::io::Error),
+    Parser(String, Vec<parser::Error>)
 }
+
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::IO(e) => write!(f, "{}", e),
-            Self::Parser(e) => {for es in e { write!(f, "{}", es)?} Ok(())}
+            Self::IO(s, e) => write!(f, "{}: {}", s, e),
+            Self::Parser(filepath, es) => {
+                let htn_source = fs::read_to_string(filepath).unwrap();
+                let mut lines = htn_source.lines();
+                let mut last_error_line = 0;
+                for e in es {
+                    if let Some(eline) = lines.nth(e.line - last_error_line-1) {
+                        let line_number_string = format!("{}", e.line);
+                        writeln!(f, "{}:{} Error:", filepath, e.line)?; 
+                        writeln!(f, "\t{}: {}", line_number_string, eline)?;
+                        last_error_line = e.line;
+                        let debug_str_col_pos = line_number_string.len() + 1 + e.col;
+                        writeln!(f, "\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos)?; 
+                    }
+                }
+                Ok(())
+            }
         }
-        
+    }
+}
+
+impl Error {
+    fn set_path(&mut self, filename:&str) {
+        match self {
+            Error::IO(ref mut f, _) |
+            Error::Parser(ref mut f, _) => f.extend(filename.chars())
+        }
     }
 }
 
@@ -34,19 +58,19 @@ impl std::error::Error for Error { }
 
 impl From<std::io::Error> for Error {
     fn from(arg: std::io::Error) -> Self {
-        Self::IO(arg)
+        Self::IO(String::new(), arg)
     }
 }
 
 impl From<parser::Error> for Error {
     fn from(arg: parser::Error) -> Self {
-        Self::Parser(vec![arg])
+        Self::Parser(String::new(), vec![arg])
     }
 }
 
 impl From<Vec<parser::Error>> for Error {
     fn from(arg: Vec<parser::Error>) -> Self {
-        Self::Parser(arg)
+        Self::Parser(String::new(), arg)
     }
 }
 
@@ -207,7 +231,7 @@ impl Domain {
         Ok(tasks)
     }
 
-    pub fn from_file(filepath:&str) -> Result<Domain, Error> {
+    pub fn wrapper(filepath:&str) -> Result<Domain, Error> {
         let mut tasks = Domain::get_tasks(filepath)?;
         let mut task_ids = HashMap::new();
         let mut main_id = None;
@@ -223,5 +247,12 @@ impl Domain {
         let variable_ids = Domain::variable_strings_to_ids(&mut tasks)?;
         let domain = Domain{tasks, task_ids, main_id:main_id.expect("Domain must contain 'Main' task"), variable_ids, filepath:String::from(filepath), neighbors};
         Ok(domain)
+    }
+
+    pub fn from_file(filepath:&str) -> Result<Domain, Error> {
+        match Domain::wrapper(filepath) {
+            Ok(r) => Ok(r),
+            Err(mut e) => {e.set_path(filepath); Err(e)} 
+        }
     }
 }

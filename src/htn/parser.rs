@@ -1,9 +1,9 @@
 use std::{fmt, rc::Rc, collections::{HashSet, HashMap}, ops::Deref, convert::{TryFrom, TryInto}};
 
 pub struct Error {
-    line: usize,
-    col: usize,
-    message: String,
+    pub line: usize,
+    pub col: usize,
+    pub message: String,
 }
 
 impl fmt::Display for Error {
@@ -1152,18 +1152,6 @@ impl Parser {
                 r
             }
         ));
-    }
-    pub fn print_parse_errors(e: &Error, htn_source:&str, filepath:&str) {
-        let mut lines = htn_source.lines();
-        let mut last_error_line = 0;
-        if let Some(eline) = lines.nth(e.line - last_error_line-1) {
-            let line_number_string = format!("{}", e.line);
-            eprintln!("{}:{} Error:", filepath, e.line); 
-            eprintln!("\t{}: {}", line_number_string, eline);
-            last_error_line = e.line;
-            let debug_str_col_pos = line_number_string.len() + 1 + e.col;
-            eprintln!("\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos); 
-        }
     }
     pub fn parse(htn_source: &str) -> Result<Vec<Stmt>, Vec<Error>> {
         let mut parser = match Lexer::tokenize(htn_source) {
