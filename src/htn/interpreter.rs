@@ -82,7 +82,7 @@ impl<T> Evaluatable<T> for Expr where T: Copy + Default +
                 }
             },
             Self::Grouping(g, _) => Ok(g.eval(state)?),
-            Self::Literal(val, _) => Ok((*val).into()),
+            Self::Literal(val, _) => Ok((val.clone()).into()),
             Self::Variable(LabelToken{idx:Some(var),..}) => Ok(state.get(*var)),
             Self::Variable(LabelToken{idx:None,..}) => Err(self.to_err(String::from("Variable has not been converted to a state index"))),
             Self::Unary(op, right) => if let Not = op.t { Ok(!right.eval(state)?)  } else { 
@@ -101,9 +101,11 @@ impl<T> Evaluatable<T> for Expr where T: Copy + Default +
             _ => Err(self.to_err(String::from("This expression is not an assignment.")))
         }
     }
+
+    
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum StateType {
     I(i32),
     B(bool),
@@ -124,24 +126,25 @@ impl std::cmp::Eq for StateType {
 
 }
 
+impl std::cmp::PartialOrd for StateType {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (StateType::I(i), StateType::I(oi)) => Some(i.cmp(oi)),
+            (StateType::B(b), StateType::B(bo)) => Some(b.cmp(bo)),
+            (StateType::F(f), StateType::F(fo)) if f.is_normal() && fo.is_normal() => f.partial_cmp(fo),
+            _ => panic!("Can't compare different types")
+        }
+    }
+}
+
 impl std::cmp::Ord for StateType {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering::*;
         match (self, other) {
             (StateType::I(i), StateType::I(oi)) => i.cmp(oi),
-            (StateType::I(_), StateType::B(_)) => Greater,
-            (StateType::I(_), StateType::F(_)) => Less,
-            (StateType::B(_), StateType::I(_)) => Less,
             (StateType::B(b), StateType::B(bo)) => b.cmp(bo),
-            (StateType::B(_), StateType::F(_)) => Less,
-            (StateType::F(_), StateType::I(_)) => Greater,
-            (StateType::F(_), StateType::B(_)) => Greater,
-            (StateType::F(f), StateType::F(fo)) => match (f.is_normal(),fo.is_normal()) {
-                (true, true) => f.partial_cmp(fo).unwrap(),
-                (true, false) => Less,
-                (false, true) => Greater,
-                (false, false) => Equal,
-            }
+            (StateType::F(f), StateType::F(fo)) if f.is_normal() && fo.is_normal() => f.partial_cmp(fo).unwrap(),
+            _ => panic!("Can't compare different types")
         }
     }
 }
@@ -164,6 +167,7 @@ impl From<parser::Literal> for StateType {
             parser::Literal::I(i) => Self::I(i),
             parser::Literal::F(f) => Self::F(f),
             parser::Literal::B(b) => Self::B(b),
+            parser::Literal::S(_) => panic!("String literals can not be part of state.")
         }
     }
 }

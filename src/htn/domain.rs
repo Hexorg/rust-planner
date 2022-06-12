@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::{fs, fmt::Debug,  collections::HashMap, rc::Rc, ops::Deref};
-use super::parser::{Parser, Stmt, StmtFormatter};
+use super::parser::{Parser, Stmt, StmtFormatter, Literal};
 use super::parser;
 
 /// Structure that holds parsed out AST as well as optimization data
@@ -193,10 +193,24 @@ impl Domain {
         self.task_ids.keys().map(|key| key.as_str())
     }
 
-    pub fn from_file(filepath:&str) -> Result<Domain, Error> {
+    fn get_tasks(filepath:&str) -> Result<Vec<Stmt>, Error> {
         let content = fs::read_to_string(filepath)?;
-        let mut tasks = Parser::parse(content.as_str())?;
-        // errors.iter().for_each(|e| Parser::print_parse_errors(e, content.as_str(), filepath));
+        let ast = Parser::parse(content.as_str())?;
+        let mut tasks = Vec::<Stmt>::new();
+        for stmt in ast {
+            if stmt.is_task() {
+                tasks.push(stmt)
+            } else if let Some(e) =  stmt.is_include() {
+                if let Some(Literal::S(s)) = e.eval_static()? {
+                    tasks.extend(Domain::get_tasks(s.as_str())?)
+                }
+            }
+        }
+        Ok(tasks)
+    }
+
+    pub fn from_file(filepath:&str) -> Result<Domain, Error> {
+        let mut tasks = Domain::get_tasks(filepath)?;
         let mut task_ids = HashMap::new();
         let mut main_id = None;
         for (idx, stmt) in tasks.iter().enumerate() {

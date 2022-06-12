@@ -99,7 +99,7 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<bool, E
         
         while let Some((current, total_plan_cost)) = openSet.pop() {
             // println!("Looking at state that resulted from calling {}: {:?}. Cost to reach: {}", current.task_name, current.state, total_plan_cost.0);
-            if are_preconditions_satisfied(goal, &current.state).unwrap() == Literal::B(true).into() {
+            if are_preconditions_satisfied(goal, &current.state).unwrap() {
                 // println!("ASTAR Success: Can reach {} now with {:?}", goal.name().unwrap(), current.state.0);
                 // println!("came from:");
                 // cameFrom.iter().for_each(|(k, v)| println!("From {} to {}", k, v.method_name));
@@ -110,7 +110,7 @@ fn are_preconditions_satisfied<T>(stmt:&Stmt, state:&State<T>) -> Result<bool, E
             for task_name in neighbors {
                 // println!("Can we run {}? ", task_name);
                 let (task, cost) = planner.get_task_and_cost(task_name, &current.state)?;
-                if are_preconditions_satisfied(task, &current.state).unwrap() == Literal::B(true).into() {
+                if are_preconditions_satisfied(task, &current.state).unwrap() {
                     // println!("conditions are satisfied for {}", task_name);
                     // println!("Current state is {:?}", current.state);
                     // println!("gScore contains current.state? {}", gScore.contains_key(&current.state));

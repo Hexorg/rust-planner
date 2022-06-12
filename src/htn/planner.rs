@@ -217,7 +217,7 @@ impl Planner {
 
         // println!("{:>depth$}Figuring out plan for {}", ' ', task.name()?, depth=depth);
 
-        if let Some((task_plan, _task_plan_cost)) = Astar(state.clone(), task, |f| Literal::F(4.0).into(), self)? {
+        if let Some((task_plan, _task_plan_cost)) = Astar(state.clone(), task, |f| 4, self)? {
             if task_plan.len() > 0 {
                 // println!("{:>depth$}To run {} we ned to run (cost {}) {:?}", ' ', task.name()?, _task_plan_cost, task_plan, depth=depth);
             }
@@ -231,7 +231,7 @@ impl Planner {
 
                 let mut method_plans = PriorityQueue::new();
                 for method in task.methods()? {
-                    if let Some((mut method_plan, method_plan_cost)) = Astar(state.clone(), method, |f| Literal::F(4.0).into(), self)? {
+                    if let Some((mut method_plan, method_plan_cost)) = Astar(state.clone(), method, |f| 4, self)? {
                         method_plan.push(method.name()?);
                         method_plans.push(method_plan, Reverse(method_plan_cost));
                     }

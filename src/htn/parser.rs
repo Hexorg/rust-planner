@@ -18,60 +18,14 @@ impl fmt::Debug for Error {
 }
 impl std::error::Error for Error { }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Literal {
     I(i32),
     F(f32),
-    B(bool)
+    B(bool),
+    S(String)
 }
 
-impl From<i32> for Literal {
-    fn from(val: i32) -> Self {
-        Self::I(val)
-    }
-}
-
-impl From<Literal> for i32 {
-    fn from(val: Literal) -> Self {
-        match val {
-            Literal::I(val) => val,
-            Literal::F(val) => val as i32,
-            Literal::B(val) => if val { 1 as i32 } else { 0 as i32}
-        }
-    }
-}
-
-impl From<f32> for Literal {
-    fn from(val: f32) -> Self {
-        Self::F(val)
-    }
-}
-
-impl From<Literal> for f32 {
-    fn from(val: Literal) -> Self {
-        match val {
-            Literal::I(val) => val as f32,
-            Literal::F(val) => val,
-            Literal::B(val) => if val { 1.0 } else { 0.0 }
-        }
-    }
-}
-
-impl From<bool> for Literal {
-    fn from(val: bool) -> Self {
-        Self::B(val)
-    }
-}
-
-impl From<Literal> for bool {
-    fn from(val: Literal) -> Self {
-        match val {
-            Literal::I(val) => val == 1,
-            Literal::F(val) => val == 1.0,
-            Literal::B(val) => val
-        }
-    }
-}
 
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -80,6 +34,7 @@ impl fmt::Display for Literal {
             I(i) => write!(f, "{}", i),
             F(fv) => write!(f, "{}", fv),
             B(b) => write!(f, "{}", if *b {"true"} else {"false"}),
+            S(s) => write!(f, "\"{}\"", s)
         }
     }
 }
@@ -94,6 +49,7 @@ pub enum TokenData {
     Pass,
     Label(String),
     Literal(Literal),
+    Include,
     Comma,
     Equals,
     EqualsEquals,
@@ -173,6 +129,7 @@ impl fmt::Display for TokenData {
             Effects => write!(f, "EFFECTS"),
             Pass => write!(f, "PASS"),
             Cost => write!(f, "COST"),
+            Include => write!(f, "INCLUDE"),
             Label(l) => write!(f, "{}", l),
             Literal(l) => write!(f, "'{}'", l),
             Comma => write!(f, ","),
@@ -229,152 +186,165 @@ impl Lexer {
         let mut depth_separator : Option<DepthSeparator> = None;
         let mut is_comment = false; // ignores the rest of the line
         let mut is_newline = true; // stays true between \n and first non-whitespace characters to allow for tabs vs spaces detection
+        let mut string_data: Option<String> = None;
         let mut r = Vec::<Token>::new(); // result
         let mut it = htn_source.chars().peekable();
         while let Some(c) = it.next() {
             if is_comment && c != '\n' {
                 continue;
             }
-            match c {
-                '#' => is_comment = true,
-                ':' => r.push(Token{line, col, len:1, t:Colon}),
-                '(' => r.push(Token{line, col, len:1, t:OpenParenthesis}),
-                ')' => r.push(Token{line, col, len:1, t:CloseParenthesis}),
-                '=' => r.push(Token{line, col, len:1, t:Equals}),
-                '-' => r.push(Token{line, col, len:1, t:Minus}),
-                '+' => r.push(Token{line, col, len:1, t:Plus}),
-                '/' => r.push(Token{line, col, len:1, t:Slash}),
-                '*' => r.push(Token{line, col, len:1, t:Star}),
-                '>' => r.push(Token{line, col, len:1, t:Greater}),
-                '<' => r.push(Token{line, col, len:1, t:Smaller}),
-                '!' => r.push(Token{line, col, len:1, t:Not}),
-                '|' => r.push(Token{line, col, len:1, t:Or}),
-                '&' => r.push(Token{line, col, len:1, t:And}),
-                ',' => r.push(Token{line, col, len:1, t:Comma}),
-                '\n' => { 
-                    is_comment = false; 
-                    is_newline = true;
-                    tab_depth = 0;
-                    line += 1; 
-                    col = 1; 
-                },
-                c if !c.is_whitespace() => {
-                    if is_newline { 
-                        // Now figure out tabs vs spaces and what tab_depth of current line is
-                        // for block start/end detection
-                        if let Some(DepthSeparator::SPACES(0)) = depth_separator { // we've seen spaces at the beginning of the line before, but it's the first ever word that's offset
-                            depth_separator = Some(DepthSeparator::SPACES(tab_depth));
-                            tab_depth = 1;
-                        } else if let Some(DepthSeparator::SPACES(sc)) = depth_separator { // we already know that we're using spaces and how many
-                            if tab_depth % sc != 0 {
-                                return Err(Error{line, col, message:String::from("Unexpected amount of spaces.")});
-                            }
-                            tab_depth = tab_depth / sc;
-                        } // else we're using tabs and '\t' => branch of this match counts tab_depth properly
-                        if tab_depth > last_block_tab_depth { // new block start
-                            if let Some(Token{t:BlockEnd,..}) = r.last() {
-                                return Err(Error{line, col, message:String::from("Unexpected block identation.")});
-                            }
-                            r.push(Token{line, col:1, len:0, t:BlockStart});
-                            last_block_tab_depth = tab_depth;
-                        } else if tab_depth == last_block_tab_depth && r.len() > 0 { // it's a new line for the old block. Previous statement has ended.
-                            r.push(Token{line:line-1, col:r.last().unwrap().col+1, len:0, t:StatementEnd});
-                        } else {
-                            while tab_depth < last_block_tab_depth {  // block(s) have ended
+            if let Some(ref mut s) = string_data { 
+                if c == '"' { 
+                    r.push(Token{line, col, len:s.len(), t:Literal(self::Literal::S(s.to_string()))});
+                    string_data = None;
+                } else {
+                    s.push(c);
+                }
+            } else { 
+                match c {
+                    '#' => is_comment = true,
+                    ':' => r.push(Token{line, col, len:1, t:Colon}),
+                    '(' => r.push(Token{line, col, len:1, t:OpenParenthesis}),
+                    ')' => r.push(Token{line, col, len:1, t:CloseParenthesis}),
+                    '=' => r.push(Token{line, col, len:1, t:Equals}),
+                    '-' => r.push(Token{line, col, len:1, t:Minus}),
+                    '+' => r.push(Token{line, col, len:1, t:Plus}),
+                    '/' => r.push(Token{line, col, len:1, t:Slash}),
+                    '*' => r.push(Token{line, col, len:1, t:Star}),
+                    '>' => r.push(Token{line, col, len:1, t:Greater}),
+                    '<' => r.push(Token{line, col, len:1, t:Smaller}),
+                    '!' => r.push(Token{line, col, len:1, t:Not}),
+                    '|' => r.push(Token{line, col, len:1, t:Or}),
+                    '&' => r.push(Token{line, col, len:1, t:And}),
+                    ',' => r.push(Token{line, col, len:1, t:Comma}),
+                    '"' => string_data = Some(String::new()),
+                    '\n' => { 
+                        is_comment = false; 
+                        is_newline = true;
+                        tab_depth = 0;
+                        line += 1; 
+                        col = 1; 
+                    },
+                    c if !c.is_whitespace() => {
+                        if is_newline { 
+                            // Now figure out tabs vs spaces and what tab_depth of current line is
+                            // for block start/end detection
+                            if let Some(DepthSeparator::SPACES(0)) = depth_separator { // we've seen spaces at the beginning of the line before, but it's the first ever word that's offset
+                                depth_separator = Some(DepthSeparator::SPACES(tab_depth));
+                                tab_depth = 1;
+                            } else if let Some(DepthSeparator::SPACES(sc)) = depth_separator { // we already know that we're using spaces and how many
+                                if tab_depth % sc != 0 {
+                                    return Err(Error{line, col, message:String::from("Unexpected amount of spaces.")});
+                                }
+                                tab_depth = tab_depth / sc;
+                            } // else we're using tabs and '\t' => branch of this match counts tab_depth properly
+                            if tab_depth > last_block_tab_depth { // new block start
                                 if let Some(Token{t:BlockEnd,..}) = r.last() {
-                                    // if multiple blocks are ending, just keep adding BLOCK_END
-                                } else {
-                                    // last block has ended, so did the previous statement
-                                    r.push(Token{line:line-1, col:r.last().unwrap().col+1, len:0, t:StatementEnd});
+                                    return Err(Error{line, col, message:String::from("Unexpected block identation.")});
                                 }
-                                r.push(Token{line, col:1, len:0, t:BlockEnd});
-                                last_block_tab_depth -=1;
-                            }
-                        }
-                        is_newline = false;
-                    } // done with tab depth detection
-                    // Now to see what kind of token this character will yield.
-                    if let Some(mut last_token) = r.last_mut() {
-                        let should_convert = if let Some(next_char) = it.peek() { !next_char.is_alphanumeric() } else { true };
-                        if let Token{t:Label(label), ..} = last_token {
-                            label.push(c);
-                            last_token.len += 1;
-                            if let Some(t) = if should_convert {
-                                    match label.as_str() { // if the label composes a keyword, replace with keyword
-                                        "task" => Some(Task),
-                                        "method" => Some(Method),
-                                        "else" => Some(Else),
-                                        "effects" => Some(Effects),
-                                        "pass" => Some(Pass),
-                                        "cost" => Some(Cost),
-                                        "or" => Some(Or),
-                                        "and" => Some(And),
-                                        "not" => Some(Not),
-                                        "false" => Some(Literal(self::Literal::B(false))),
-                                        "true" => Some(Literal(self::Literal::B(true))),
-                                        _ => { if label.contains('.') { 
-                                                if let Ok(literal) = label.parse::<f32>() {
-                                                    Some(Literal(self::Literal::F(literal)))
-                                                } else {
-                                                    None
-                                                }
-                                            } else if let Ok(literal) = label.parse::<i32>() {
-                                                Some(Literal(self::Literal::I(literal)))
-                                            } else { None }},
-                                    }
-                                } else { None } {
-                                last_token.t = t;
-                            }
-                        } else { // last token isn't a label so we're starting a new label or keyword
-                            if should_convert {
-                                if c.is_numeric() {
-                                    r.push(Token{line, col, len:1, t:Literal(self::Literal::I(c.to_digit(10).unwrap() as i32))})
-                                }
+                                r.push(Token{line, col:1, len:0, t:BlockStart});
+                                last_block_tab_depth = tab_depth;
+                            } else if tab_depth == last_block_tab_depth && r.len() > 0 { // it's a new line for the old block. Previous statement has ended.
+                                r.push(Token{line:line-1, col:r.last().unwrap().col+1, len:0, t:StatementEnd});
                             } else {
-                                r.push(Token{line, col, len:1, t:Label(String::from(c))})
+                                while tab_depth < last_block_tab_depth {  // block(s) have ended
+                                    if let Some(Token{t:BlockEnd,..}) = r.last() {
+                                        // if multiple blocks are ending, just keep adding BLOCK_END
+                                    } else {
+                                        // last block has ended, so did the previous statement
+                                        r.push(Token{line:line-1, col:r.last().unwrap().col+1, len:0, t:StatementEnd});
+                                    }
+                                    r.push(Token{line, col:1, len:0, t:BlockEnd});
+                                    last_block_tab_depth -=1;
+                                }
                             }
+                            is_newline = false;
+                        } // done with tab depth detection
+                        // Now to see what kind of token this character will yield.
+                        if let Some(mut last_token) = r.last_mut() {
+                            let should_convert = if let Some(next_char) = it.peek() { !next_char.is_alphanumeric() && *next_char != '.' } else { true };
+                            if let Token{t:Label(label), ..} = last_token {
+                                label.push(c);
+                                last_token.len += 1;
+                                if let Some(t) = if should_convert {
+                                        match label.as_str() { // if the label composes a keyword, replace with keyword
+                                            "task" => Some(Task),
+                                            "method" => Some(Method),
+                                            "else" => Some(Else),
+                                            "effects" => Some(Effects),
+                                            "include" => Some(Include),
+                                            "pass" => Some(Pass),
+                                            "cost" => Some(Cost),
+                                            "or" => Some(Or),
+                                            "and" => Some(And),
+                                            "not" => Some(Not),
+                                            "false" => Some(Literal(self::Literal::B(false))),
+                                            "true" => Some(Literal(self::Literal::B(true))),
+                                            _ => { if label.contains('.') { 
+                                                    if let Ok(literal) = label.parse::<f32>() {
+                                                        Some(Literal(self::Literal::F(literal)))
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else if let Ok(literal) = label.parse::<i32>() {
+                                                    Some(Literal(self::Literal::I(literal)))
+                                                } else { None }},
+                                        }
+                                    } else { None } {
+                                    last_token.t = t;
+                                }
+                            } else { // last token isn't a label so we're starting a new label or keyword
+                                if should_convert {
+                                    if c.is_numeric() {
+                                        r.push(Token{line, col, len:1, t:Literal(self::Literal::I(c.to_digit(10).unwrap() as i32))})
+                                    }
+                                } else {
+                                    r.push(Token{line, col, len:1, t:Label(String::from(c))})
+                                }
+                            }
+                        } else {
+                            // this is the first token ever
+                            r.push(Token{line, col, len:1, t:Label(String::from(c))})
                         }
-                    } else {
-                        // this is the first token ever
-                        r.push(Token{line, col, len:1, t:Label(String::from(c))})
-                    }
-                },
-                '\t' if is_newline => { if depth_separator.is_none() { // if we don't know if we're using tabs or spaces
-                        depth_separator = Some(DepthSeparator::TABS);
-                    } else if let Some(DepthSeparator::SPACES(_)) = depth_separator {
-                        return Err(Error{line, col, message:String::from("Tabs and spaces can't be used together")})
-                    }
-                    tab_depth += 1;
-                },
-                c if c.is_whitespace() => {
-                    if is_newline { 
-                        if depth_separator.is_none() {
-                            depth_separator = Some(DepthSeparator::SPACES(0));
-                        } else if let Some(DepthSeparator::TABS) = depth_separator {
+                    },
+                    '\t' if is_newline => { if depth_separator.is_none() { // if we don't know if we're using tabs or spaces
+                            depth_separator = Some(DepthSeparator::TABS);
+                        } else if let Some(DepthSeparator::SPACES(_)) = depth_separator {
                             return Err(Error{line, col, message:String::from("Tabs and spaces can't be used together")})
                         }
-                        tab_depth += 1; // tab_depth counts amount of spaces seen first. Then on the first non-whitespace character we convert amount of spaces to actual tab-depth
-                    }
-                    if if let Some(next_char) = it.peek() { next_char.is_alphanumeric() } else { false } {
-                        r.push(Token{line, col, len:1, t:Label(String::new())})
-                    }
-                },
-                _ => (),
-            }
-            col += 1;
-            if let Some(Token{t:Equals,..}) = r.last() { // combine multi-symbol operands like -= and <=
-                match r.get(r.len()-2) {
-                    Some(Token{t:Equals,..}) => {r.pop(); r.last_mut().unwrap().t = EqualsEquals},
-                    Some(Token{t:Smaller,..}) => {r.pop(); r.last_mut().unwrap().t = SmallerOrEquals},
-                    Some(Token{t:Greater,..}) => {r.pop(); r.last_mut().unwrap().t = GreaterOrEquals},
-                    Some(Token{t:Not,..}) => {r.pop(); r.last_mut().unwrap().t = NotEquals},
-                    Some(Token{t:Minus,..}) => {r.pop(); r.last_mut().unwrap().t = SubtractFrom},
-                    Some(Token{t:Plus,..}) => {r.pop(); r.last_mut().unwrap().t = AddTo},
-                    Some(Token{t:Slash,..}) => {r.pop(); r.last_mut().unwrap().t = DivideBy},
-                    Some(Token{t:Star,..}) => {r.pop(); r.last_mut().unwrap().t = MultiplyBy},
+                        tab_depth += 1;
+                    },
+                    c if c.is_whitespace() => {
+                        if is_newline { 
+                            if depth_separator.is_none() {
+                                depth_separator = Some(DepthSeparator::SPACES(0));
+                            } else if let Some(DepthSeparator::TABS) = depth_separator {
+                                return Err(Error{line, col, message:String::from("Tabs and spaces can't be used together")})
+                            }
+                            tab_depth += 1; // tab_depth counts amount of spaces seen first. Then on the first non-whitespace character we convert amount of spaces to actual tab-depth
+                        }
+                        if if let Some(next_char) = it.peek() { next_char.is_alphanumeric() } else { false } {
+                            r.push(Token{line, col, len:1, t:Label(String::new())})
+                        }
+                    },
                     _ => (),
                 }
+                if let Some(Token{t:Equals,..}) = r.last() { // combine multi-symbol operands like -= and <=
+                    match r.get(r.len()-2) {
+                        Some(Token{t:Equals,..}) => {r.pop(); r.last_mut().unwrap().t = EqualsEquals},
+                        Some(Token{t:Smaller,..}) => {r.pop(); r.last_mut().unwrap().t = SmallerOrEquals},
+                        Some(Token{t:Greater,..}) => {r.pop(); r.last_mut().unwrap().t = GreaterOrEquals},
+                        Some(Token{t:Not,..}) => {r.pop(); r.last_mut().unwrap().t = NotEquals},
+                        Some(Token{t:Minus,..}) => {r.pop(); r.last_mut().unwrap().t = SubtractFrom},
+                        Some(Token{t:Plus,..}) => {r.pop(); r.last_mut().unwrap().t = AddTo},
+                        Some(Token{t:Slash,..}) => {r.pop(); r.last_mut().unwrap().t = DivideBy},
+                        Some(Token{t:Star,..}) => {r.pop(); r.last_mut().unwrap().t = MultiplyBy},
+                        _ => (),
+                    }
+                }
             }
+            col += 1;
+            
         }
         // End of file. Finish off whatever blocks have been here
         // if last_block_tab_depth > 0 {
@@ -461,6 +431,63 @@ impl Expr {
             Self::Noop(_) => (),
         }
         vars
+    }
+
+    pub fn eval_static(&self) -> Result<Option<Literal>, Error> {
+        match self {
+            Expr::Binary(left, op, right) => { 
+                let left = left.eval_static()?;
+                let right = right.eval_static()?;
+                match (&op.t, left, right) {
+                    (TokenData::EqualsEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l == r))),
+                    (TokenData::EqualsEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l == r))),
+                    (TokenData::EqualsEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l == r))),
+                    (TokenData::Minus, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l - r))),
+                    (TokenData::Minus, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l - r))),
+                    (TokenData::Plus, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l + r))),
+                    (TokenData::Plus, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l + r))),
+                    (TokenData::Slash, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l / r))),
+                    (TokenData::Slash, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l / r))),
+                    (TokenData::Star, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l * r))),
+                    (TokenData::Star, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::F(l * r))),
+                    (TokenData::Greater, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l > r))),
+                    (TokenData::Greater, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l > r))),
+                    (TokenData::Greater, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l > r))),
+                    (TokenData::Smaller, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l < r))),
+                    (TokenData::Smaller, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l < r))),
+                    (TokenData::Smaller, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l < r))),
+                    (TokenData::GreaterOrEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l >= r))),
+                    (TokenData::GreaterOrEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l >= r))),
+                    (TokenData::GreaterOrEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l >= r))),
+                    (TokenData::SmallerOrEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l <= r))),
+                    (TokenData::SmallerOrEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l <= r))),
+                    (TokenData::SmallerOrEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l <= r))),
+                    (TokenData::NotEquals, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l != r))),
+                    (TokenData::NotEquals, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::B(l != r))),
+                    (TokenData::NotEquals, Some(Literal::F(l)), Some(Literal::F(r))) => Ok(Some(Literal::B(l != r))),
+                    (TokenData::Or, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l | r))),
+                    (TokenData::Or, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l | r))),
+                    (TokenData::And, Some(Literal::B(l)), Some(Literal::B(r))) => Ok(Some(Literal::B(l & r))),
+                    (TokenData::And, Some(Literal::I(l)), Some(Literal::I(r))) => Ok(Some(Literal::I(l | r))),
+                    _ => Err(self.to_err(String::from("Unsupported operation. Can not evaluate statically."))),
+                }
+            },
+            Expr::Grouping(g, _) => g.eval_static(),
+            Expr::Literal(l, _) => Ok(Some(l.clone())),
+            Expr::Variable(t) => Err(self.to_err(String::from("Expression contains variables. Can't evaluate statically."))),
+            Expr::Unary(op, e) => if let TokenData::Not = op.t {
+                if let Some(Literal::B(b)) = e.eval_static()? {
+                    Ok(Some(Literal::B(!b)))
+                } else {
+                    Err(self.to_err(String::from("Unable to statically invert a non-boolean literal.")))
+                }
+            } else {
+                Err(self.to_err(String::from("Unexpected unary operator.")))
+            },
+            Expr::Assignment(_, e) => e.eval_static(),
+            Expr::Call(_, _) => Err(self.to_err(String::from("Expression contains Calls. Can't evaluate statically."))),
+            Expr::Noop(_) => Ok(None),
+        }
     }
 
     pub fn set_var_ids(&mut self, map: &HashMap<String, usize>) {
@@ -552,7 +579,8 @@ pub enum Stmt {
         effects:Option<Box<Stmt>>, 
     }, 
     Block(Vec<Stmt>),
-    Expression(Expr)
+    Expression(Expr),
+    Include(Expr)
 }
 
 pub struct StmtFormatter<'a> {
@@ -585,7 +613,8 @@ impl std::fmt::Display for StmtFormatter<'_> {
                 blk.iter().try_for_each(|stmt| StmtFormatter{depth:new_depth, stmt, max_line_count:self.max_line_count}.fmt(f))
                 // write!(f, "block_end\n")
             },
-            Stmt::Expression(e) => writeln!(f, "{:>lc$}: {:>depth$}{}", self.stmt.line_no(), ' ', e, depth=self.depth, lc=self.max_line_count)
+            Stmt::Expression(e) => writeln!(f, "{:>lc$}: {:>depth$}{}", self.stmt.line_no(), ' ', e, depth=self.depth, lc=self.max_line_count),
+            Stmt::Include(e) => writeln!(f, "{:>lc$}: {:>depth$}include {}", self.stmt.line_no(), ' ', e, depth=self.depth, lc=self.max_line_count)
         }?;
         if let Stmt::Task{effects:Some(e),..} = self.stmt {
             writeln!(f, "{:>lc$}: {:>depth$}EFFECTS:", self.stmt.line_no(), ' ', depth=self.depth, lc=self.max_line_count)?;
@@ -644,7 +673,8 @@ impl Stmt {
             Stmt::Method{name,..} |
             Stmt::Task{name,..} => Error{line:name.line, col:name.col, message:msg},
             Stmt::Block(blk) => blk.first().expect("Unable to generate error for empty block.").to_err(msg),
-            Stmt::Expression(e) => e.to_err(msg),
+            Stmt::Expression(e) |
+            Stmt::Include(e) => e.to_err(msg),
         }
     }
 
@@ -653,7 +683,8 @@ impl Stmt {
             Self::Method{name,..} |
             Self::Task{name,..} => name.line,
             Stmt::Block(blk) => blk.first().expect("Unable to get line for empty block").line_no(),
-            Stmt::Expression(e) => e.line_no()
+            Stmt::Expression(e) |
+            Stmt::Include(e) => e.line_no()
         }
     }
     pub fn name(&self) -> Result<&str, Error> {
@@ -688,6 +719,13 @@ impl Stmt {
         match self {
             Self::Task{..} => true,
             _ => false,
+        }
+    }
+
+    pub fn is_include(&self) -> Option<&Expr> {
+        match self {
+            Self::Include(s) => Some(s),
+            _ => None,
         }
     }
 
@@ -838,9 +876,9 @@ impl Parser {
     }
     fn primary(&mut self) -> Result<Expr, Error> {
         // Literal | "(" expression ")"
-        if let TokenData::Literal(val)  = self.tokens[self.idx].t {
+        if let TokenData::Literal(ref val)  = self.tokens[self.idx].t {
             self.idx += 1;
-            Ok(Expr::Literal(val, self.tokens[self.idx].clone()))
+            Ok(Expr::Literal(val.clone(), self.tokens[self.idx].clone()))
         } else if let TokenData::OpenParenthesis = self.tokens[self.idx].t {
             self.idx += 1;
             let expr = self.expression()?;
@@ -1019,7 +1057,6 @@ impl Parser {
         
     }
     fn method_statement(&mut self, parent_task:Option<&str>) -> Result<Stmt, Error> {
-        let token_id = self.idx-1;
         let parent_task = parent_task.unwrap();
         pexpect!(self, TokenData::Label(_), {
             let mut name: LabelToken = self.tokens[self.idx-1].clone().try_into()?;
@@ -1061,6 +1098,13 @@ impl Parser {
             }, "Expected ':' after method declaration.")
         }, "Expected method name.")
     }
+    fn include_statement(&mut self) -> Result<Stmt, Error> {
+        let expr = self.expression()?;
+        pexpect!(self, 
+            (TokenData::StatementEnd | TokenData::BlockStart | TokenData::BlockEnd), 
+            {Ok(Stmt::Include(expr))}, 
+            "Expected new line after expression.")
+    }
     fn statement(&mut self, parent:Option<&str>) -> Result<Stmt, Error> {
         // println!("When Parsing a new statement, next token is {}.", self.tokens[self.idx]);
         let r = if let TokenData::Task = self.tokens[self.idx].t {
@@ -1072,6 +1116,9 @@ impl Parser {
         } else if let TokenData::Method = self.tokens[self.idx].t {
             self.idx += 1;
             self.method_statement(parent)
+        } else if let TokenData::Include = self.tokens[self.idx].t {
+            self.idx += 1;
+            self.include_statement()
         } else if let TokenData::EOF = self.tokens[self.idx].t {
             let line = self.tokens[self.idx].line;
             let col = self.tokens[self.idx].col;
@@ -1124,7 +1171,7 @@ impl Parser {
             Ok(tokens) => Parser{idx:0, tokens},
             Err(e) => { errors.push(e); return Err(errors); }
         };
-        // Parser::print_tokens(&parser.tokens);
+        Parser::print_tokens(&parser.tokens);
         while parser.idx + 1 < parser.tokens.len() {
             match parser.statement(None) {
                 Err(e) => {errors.push(e); parser.error_recover(); },
