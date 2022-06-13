@@ -250,8 +250,6 @@ impl Domain {
             let name = stmt.name()?;
             if name == "Main" {
                 main_id = Some(idx);
-            } else {
-                dbg!(name);
             }
             if let Some(t) = task_ids.insert(String::from(name), idx) {
                 return Err(Error::Parser(String::new(), vec![stmt.to_err(String::from("Multiple definitions of this task."))]))

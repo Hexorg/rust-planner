@@ -317,6 +317,12 @@ impl Lexer {
                                 return Err(Error{line, col, message:String::from("Tabs and spaces can't be used together")})
                             }
                             tab_depth += 1; // tab_depth counts amount of spaces seen first. Then on the first non-whitespace character we convert amount of spaces to actual tab-depth
+                        } else {
+                            if let Some(next_char) = it.peek() {
+                                if next_char.is_alphabetic() {
+                                    r.push(Token{line, col, len:1, t:Label(String::new())})
+                                }
+                            }
                         }
                     },
                     _ => (),
@@ -869,7 +875,11 @@ impl Parser {
     fn error_recover(&mut self) {
         self.idx += 1;
         while self.idx + 1 < self.tokens.len() {
-            if let TokenData::Task = self.tokens[self.idx].t {
+            if let TokenData::Task | TokenData::Method | TokenData::CloseParenthesis  = self.tokens[self.idx].t {
+                return;
+            }
+            if let TokenData::StatementEnd = self.tokens[self.idx].t {
+                self.idx += 1;
                 return;
             }
             self.idx += 1;
@@ -1005,11 +1015,14 @@ impl Parser {
         })
     }
     fn expression(&mut self) -> Result<Expr, Error> {
-        self.assignment()
+        match self.assignment() {
+            Ok(e) => Ok(e),
+            Err(e) => {self.errors.push(e); self.error_recover(); Ok(Expr::Noop(self.tokens[self.idx].clone()))}
+        }
     }
 
     fn effects_statement(&mut self) -> Result<Stmt, Error> {
-        pexpect_prevtoken!(self, TokenData::Colon, {self.statement(None)}, "Expected ':' after 'effects'.")
+        pexpect!(self, TokenData::Colon, {self.statement(None)}, "Expected ':' after 'effects'.")
     }
     fn task_statement(&mut self) -> Result<Stmt, Error> {
         // let token_id = self.idx-1;
@@ -1024,7 +1037,7 @@ impl Parser {
             pmatch!(self, TokenData::Cost, {
                 cost = Some(self.expression()?);
             });
-            pexpect_prevtoken!(self, TokenData::Colon, {
+            pexpect!(self, TokenData::Colon, {
                 let body = Box::new(self.statement(Some(name.string.as_str()))?);
                 let mut effects = None;
                 pmatch!(self, TokenData::Effects, {effects = Some(Box::new(self.effects_statement()?));});
@@ -1043,12 +1056,16 @@ impl Parser {
     fn block_statement(&mut self, parent_task:Option<&str>) -> Result<Stmt, Error> {
         let mut stmts = Vec::<Stmt>::new();
         loop {
-            let mut stmt = self.statement(parent_task)?;
-            if let Stmt::Block(ref mut inner) = stmt {
-                stmts.append(inner);
-            } else {
-                stmts.push(stmt);
+            let stmt = self.statement(parent_task);
+            match stmt {
+                Ok(stmt) => if let Stmt::Block(inner) = stmt {
+                    stmts.extend(inner);
+                } else {
+                    stmts.push(stmt);
+                },
+                Err(e) => {self.errors.push(e); self.error_recover()}
             }
+            
 
             if let TokenData::BlockEnd | TokenData::EOF = self.tokens[self.idx].t {
                 self.idx += 1;
@@ -1058,7 +1075,7 @@ impl Parser {
         
     }
     fn method_statement(&mut self, parent_task:Option<&str>) -> Result<Stmt, Error> {
-        let parent_task = parent_task.unwrap();
+        let parent_task = parent_task.unwrap_or("Error");
         pexpect!(self, TokenData::Label(_), {
             let mut name: LabelToken = self.tokens[self.idx-1].clone().try_into()?;
             let else_name = format!("{}.Dont{}", parent_task, name.string);

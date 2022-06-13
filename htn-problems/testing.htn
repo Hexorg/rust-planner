@@ -10,7 +10,7 @@ task Main:
     method Run_Task(cnd3):
         Task2()
 
-task Task2(cnd4):
+task Task2(cnd7) effects:
     op3()
 effects:
     cnd4 = false
