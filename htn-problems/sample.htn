@@ -1,2 +1,74 @@
-task Wait(cnd4):
-    wait()
+task Main(cell5 & cell6):
+    done()
+
+task Pickup1(cell1 & !carry):
+    carry = pikcup(cell1)
+effects:
+    cell1 = false
+    carry = true
+
+task Pickup2(cell2 & !carry):
+    carry = pikcup(cell1)
+effects:
+    cell2 = false
+    carry = true
+
+task Pickup3(cell3 & !carry):
+    carry = pikcup(cell3)
+effects:
+    cell3 = false
+    carry = true
+
+task Pickup4(cell4 & !carry):
+    carry = pikcup(cell4)
+effects:
+    cell4 = false
+    carry = true
+
+task Pickup5(cell5 & !carry):
+    carry = pikcup(cell5)
+effects:
+    cell5 = false
+    carry = true
+
+task Pickup6(cell6 & !carry):
+    carry = pikcup(cell6)
+effects:
+    cell6 = false
+    carry = true
+
+task PutDown1(carry & !cell1):
+    putdown(cell1, carry)
+effects:
+    cell1 = true
+    carry = false
+
+task PutDown2(carry & !cell2):
+    putdown(cell2, carry)
+effects:
+    cell2 = true
+    carry = false
+
+task PutDown3(carry & !cell3):
+    putdown(cell3, carry)
+effects:
+    cell3 = true
+    carry = false
+
+task PutDown4(carry & !cell4):
+    putdown(cell4, carry)
+effects:
+    cell4 = true
+    carry = false
+
+task PutDown5(carry & !cell5):
+    putdown(cell5, carry)
+effects:
+    cell5 = true
+    carry = false
+
+task PutDown6(carry & !cell6):
+    putdown(cell6, carry)
+effects:
+    cell6 = true
+    carry = false

@@ -9,7 +9,7 @@ use htn::interpreter::{State, StateType};
 
 
 fn main() {
-    let domain = match Domain::from_file("htn-problems/testing.htn") {
+    let domain = match Domain::from_file("htn-problems/sample.htn") {
         Ok(domain) => domain,
         Err(e) => {eprintln!("{}", e); panic!()},
     };
@@ -18,8 +18,14 @@ fn main() {
     let vid = &planner.domain.variable_ids;
     let mut state = planner.new_state();
     use StateType::*;
-    state.set(*vid.get("cnd3").unwrap(), B(true));
-    state.set(*vid.get("cnd4").unwrap(), B(true));
+    // println!("VarMap: {:?}", vid);
+    state.set(*vid.get("carry").unwrap(), B(false));
+    state.set(*vid.get("cell1").unwrap(), B(true));
+    state.set(*vid.get("cell2").unwrap(), B(true));
+    state.set(*vid.get("cell3").unwrap(), B(false));
+    state.set(*vid.get("cell4").unwrap(), B(false));
+    state.set(*vid.get("cell5").unwrap(), B(false));
+    state.set(*vid.get("cell6").unwrap(), B(false));
 
 
     let plan = planner.plan(&state).unwrap();

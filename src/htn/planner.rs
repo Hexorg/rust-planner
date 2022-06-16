@@ -219,9 +219,9 @@ impl Planner {
         // println!("{:>depth$}Figuring out plan for {}", ' ', task.name()?, depth=depth);
 
         if let Some((task_plan, _task_plan_cost)) = Astar(state.clone(), task, |f| 4, self)? {
-            if task_plan.len() > 0 {
-                // println!("{:>depth$}To run {} we ned to run (cost {}) {:?}", ' ', task.name()?, _task_plan_cost, task_plan, depth=depth);
-            }
+            // if task_plan.len() > 0 {
+            //     println!("{:>depth$}To run {} we ned to run (cost {}) {:?}", ' ', task.name()?, _task_plan_cost, task_plan, depth=depth);
+            // }
             for subtask in task_plan {
                 if !self.run_astar(plan, state, self.domain.get_task(&subtask).unwrap(), depth+2)? {
                     return Err(task.to_err(String::from("Planner thought task is achievable but it's not")).into());
@@ -233,7 +233,7 @@ impl Planner {
                 let mut method_plans = PriorityQueue::new();
                 for method in task.methods()? {
                     if let Some((mut method_plan, method_plan_cost)) = Astar(state.clone(), method, |f| 4, self)? {
-                        method_plan.push(method.name()?);
+                        method_plan.push(String::from(method.name()?));
                         method_plans.push(method_plan, Reverse(method_plan_cost+self.get_cost(method, state)?));
                     }
                 }
@@ -321,6 +321,7 @@ impl Planner {
         std::ops::Not<Output = T> {
         let mut plan = Plan::new();
         let mut state = state.clone();
+        println!("Running planning...");
         self.run_astar(&mut plan, &mut state, self.domain.get_main(), 0)?;
         Ok(plan)
     }
