@@ -1,7 +1,7 @@
 task Main(cell5 & cell6):
-    done()
+    complete()
 
-task Pickup1(cell1 & !carry):
+task Pickup1(cell1 & !cell2 & !carry):
     carry = pikcup(cell1)
 effects:
     cell1 = false
@@ -67,7 +67,7 @@ effects:
     cell5 = true
     carry = false
 
-task PutDown6(carry & !cell6):
+task PutDown6(carry & cell5 & !cell6):
     putdown(cell6, carry)
 effects:
     cell6 = true

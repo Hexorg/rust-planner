@@ -1,5 +1,3 @@
-include "htn-problems/sample.htn"
-
 task Main:
     method Run1(cnd1):
         op1()
@@ -10,7 +8,7 @@ task Main:
     method Run_Task(cnd3):
         Task2()
 
-task Task2(cnd7) effects:
+task Task2(cell.is_empty) on Cell as cell:
     op3()
 effects:
     cnd4 = false

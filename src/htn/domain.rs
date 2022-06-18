@@ -1,16 +1,112 @@
 use std::collections::HashSet;
+use std::hash::Hash;
+use std::mem;
 use std::{fs, fmt::Debug,  collections::HashMap, rc::Rc, ops::Deref};
-use super::parser::{Parser, Stmt, StmtFormatter, Literal};
+
+use super::parser::expression::ExpressionVisitor;
+use super::parser::statement::StatementVisitor;
+use super::parser::{Parser, statement::{Stmt, Binding}, tokens::{self, Token, TokenData}, expression::Expr};
 use super::parser;
+
+#[derive(Clone, Copy, Debug)]
+pub enum Literal {
+    I(i32),
+    F(f32),
+    B(bool)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Operation {
+    ReadState(usize),
+    WriteState(usize),
+    Push(Literal),
+    Equals,
+    Greater,
+    Smaller,
+    GreaterOrEquals,
+    SmallerOrEquals,
+    Not, 
+    And,
+    Or,
+    Subtract,
+    Add,
+    Multiply,
+    Divide,
+    ReadBlackboard(usize),
+    WriteBlackboard(usize),
+    PlanTask(usize),
+    CallOperator(usize, usize), // (operator_id, arity)
+}
+#[derive(Debug)]
+pub struct PrimitiveTask {
+    pub preconditions: Vec<Operation>,
+    pub cost: i32,
+    pub body: Vec<Operation>,
+    pub effects: Vec<Operation>
+}
+#[derive(Debug)]
+pub struct ComplexTask {
+    pub preconditions: Vec<Operation>,
+    pub cost: i32,
+    pub body: Vec<PrimitiveTask>,
+    pub effects: Vec<Operation>,
+    task_ids: HashMap<String, usize>,
+}
+
+#[derive(Debug)]
+pub enum Task {
+    Complex(ComplexTask),
+    Primitive(PrimitiveTask),
+}
+
+impl Task {
+    pub fn get_state_effects(&self) -> HashSet<usize> {
+        let mut result = HashSet::new();
+        match self {
+            Self::Complex(ComplexTask{effects,..}) |
+            Self::Primitive(PrimitiveTask{effects,..}) => {
+                effects.iter().for_each(|e| if let Operation::WriteState(idx) = e { result.insert(*idx); })
+            }
+        }
+        result
+    }
+
+    pub fn get_state_depends(&self) -> HashSet<usize> {
+        let mut result = HashSet::new();
+        match self {
+            Self::Complex(ComplexTask {preconditions,..}) |
+            Self::Primitive(PrimitiveTask {preconditions,..}) => {
+                preconditions.iter().for_each(|p| if let Operation::ReadState(idx) = p { result.insert(*idx); });
+            }
+        }
+        result
+    }
+}
+
+
+struct ExpressionCompiler {
+    pub bytecode:Vec<Operation>,
+    pub substitution: Option<String>,
+    pub substitution_count: usize,
+    state_mapping:HashMap<String, usize>,
+    blackboard_mapping:HashMap<String, usize>,
+    operator_mapping:HashMap<String, usize>,
+    task_mapping: HashMap<String, usize>,
+}
 
 /// Structure that holds parsed out AST as well as optimization data
 pub struct Domain {
     pub filepath: String,
-    pub tasks: Vec<Stmt>,
-    pub variable_ids: HashMap<String, usize>,
-    neighbors: HashMap<String, Vec<String>>,
-    task_ids: HashMap<String, usize>,
+    pub tasks: Vec<Task>,
+    // pub variable_ids: HashMap<String, usize>,
+    pub neighbors: HashMap<usize, Vec<usize>>,
     main_id: Option<usize>,
+    compiler: ExpressionCompiler,
+    pass_count: usize,
+    type_counts:HashMap<String, usize>,
+    methods: Vec<PrimitiveTask>,
+    method_ids: HashMap<String, usize>,
+    
 }
 
 #[derive(Debug)]
@@ -85,184 +181,272 @@ impl From<Vec<parser::Error>> for Error {
     }
 }
 
-impl std::fmt::Display for Domain {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Domain({}):\n", self.filepath)?;
-    
-        let mut max_line_count = 0;
-        if let Some(mut largest_line) = self.tasks.iter().last().map(|task| task.line_no()) {
-            while largest_line > 0 {
-                largest_line /= 10;
-                max_line_count += 1;
-            }
-        }
-        self.tasks.iter().try_for_each(|stmt| write!(f, "{}", StmtFormatter{depth:0, max_line_count, stmt}))
-    }
-}
-
 impl std::fmt::Debug for Domain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Domain({}):\n", self.filepath)?;
-        let mut max_line_count = 0;
-        if let Some(mut largest_line) = self.tasks.iter().last().map(|task| task.line_no()) {
-            while largest_line > 0 {
-                largest_line /= 10;
-                max_line_count += 1;
-            }
+        writeln!(f, "Domain({}):", self.filepath)?;
+        writeln!(f, "State mapping: {:?}", self.compiler.state_mapping)?;
+        writeln!(f, "Task neighbors: {:?}", self.neighbors)?;
+        writeln!(f, "Tasks:")?;
+        for (id, task) in self.tasks.iter().enumerate() {
+            writeln!(f, "{}: {:?}", id, task)?;
         }
-        self.tasks.iter().try_for_each(|stmt| write!(f, "{:?}", StmtFormatter{depth:0, max_line_count, stmt}))
+        Ok(())
     }
 }
 
-impl Domain {
-    fn get_neighbors(tasks:&Vec<Stmt>) -> Result<HashMap<String, Vec<String>>, Error> {
-        let mut result = HashMap::new();
-        for (i, x) in tasks.iter().enumerate() {
-            let writes = if let Some(e) = x.effects()? {
-                e.expressions()?.fold(HashSet::new(), |mut acc,item| {if let Some(w) = item.get_writes() { acc.insert(w); } acc})
-            } else {
-                HashSet::new()
-            };
-            let mut to_vec = Vec::new();
-            for (iy, y) in tasks.iter().enumerate() {
-                if iy != i {
-                    if let Some(p) = y.preconditions()? {
-                        if writes.intersection(&p.get_reads()).count() > 0 {
-                            to_vec.push(String::from(y.name()?));
-                            
-                        }
-                    }
-                }
-            }
-            result.insert(String::from(x.name()?), to_vec);
-        }
-        Ok(result)
+
+
+impl ExpressionCompiler {
+    pub fn new() -> Self {
+        Self { bytecode: Vec::new(), state_mapping: HashMap::new(), blackboard_mapping: HashMap::new(), operator_mapping: HashMap::new(), task_mapping:HashMap::new(), substitution:None, substitution_count:0}
     }
+    #[inline]
+    fn get_varpath_state_idx(&mut self, var_path:&[Token]) -> usize {
+        let mut iter = var_path.iter();
 
-    fn variable_strings_to_ids(tasks:&mut Vec<Stmt>) -> Result<HashMap<String, usize>, Error> {
-        let mut state_variables = HashMap::new();
-        // First build a map of variable names to IDs
-        for task in tasks.iter() {
-            if let Some(preconditions) = task.preconditions()? {
-                for var in preconditions.get_reads() {
-                    if !state_variables.contains_key(var) {
-                        state_variables.insert(String::from(var), state_variables.len());
-                    }
-                }
-            }
-            if task.is_composite()? {
-                for method in task.methods()? {
-                    if let Some(preconditions) = method.preconditions()? {
-                        for var in preconditions.get_reads() {
-                            if !state_variables.contains_key(var) {
-                                state_variables.insert(String::from(var), state_variables.len());
-                            }
+        let first = iter.by_ref().take(1).map(|t| {
+                if let Token{t:TokenData::Label(s),..} = t {
+                    if let Some(sub) = &self.substitution {
+                        if s == sub {
+                            format!("{}{}", sub, self.substitution_count)
+                        } else {
+                            s.clone()
                         }
+                    } else {
+                        s.clone()
                     }
+                } else {
+                    "Default".to_owned()
                 }
-            }
-        }
+            }).fold(String::new(), |acc, item| acc + item.as_str());
 
-        // Set var IDs 
-        for task in tasks.iter_mut() {
-            if let Some(preconditions) = task.preconditions_mut()? {
-                preconditions.set_var_ids(&state_variables);
-            }
-            if let Some(cost) = task.cost_mut()? {
-                cost.set_var_ids(&state_variables)
-            }
-            if task.is_composite()? {
-                for method in task.methods_mut()? {
-                    if let Stmt::Method{preconditions:Some(preconditions),..} = method {
-                        preconditions.set_var_ids(&state_variables);
-                    }
-                }
-            }
-        }
-
-        // Check if we have unsed effects
-        for task in tasks.iter_mut() {
-            if let Some(effects) = task.effects_mut()? {
-                for op in effects.expressions()? {
-                    if let Some(effect) = op.get_writes() {
-                        if !state_variables.contains_key(effect) {
-                            return Err(op.to_err(String::from("Effect assigned but never used")).into())
-                        }
-                    }
-                }
-                for op in effects.expressions_mut()? {
-                    if let Stmt::Expression(e) = op {
-                        e.set_var_ids(&state_variables);
-                    }
-                    
-                }
-            }
-        }
-
-        Ok(state_variables)
-    }
-
-    pub fn get_task(&self, name:&str) -> Option<&Stmt> {
-        if let Some(id) = self.task_ids.get(name) {
-            self.tasks.get(*id)
+        let vname = iter.map(|t| if let TokenData::Label(s) = &t.t { s.as_str() } else { "" }).fold(first, |acc,item| acc + "." + item);
+        if self.state_mapping.contains_key(&vname) {
+            self.state_mapping[&vname]
         } else {
-            None
+            let s = self.state_mapping.len();
+            self.state_mapping.insert(vname, s);
+            s
+        }
+    }
+    #[inline]
+    fn get_varpath_blackboard_idx(&mut self, var_path:&[Token]) -> usize {
+        let vname = var_path.iter().map(|t| if let TokenData::Label(s) = &t.t { s.as_str() } else { "" }).fold(String::new(), |acc,item| acc + "." + item);
+        if self.blackboard_mapping.contains_key(&vname) {
+            self.blackboard_mapping[&vname]
+        } else {
+            let s = self.blackboard_mapping.len();
+            self.blackboard_mapping.insert(vname, s);
+            s
+        }
+    }
+}
+
+impl ExpressionVisitor<(), Error> for ExpressionCompiler {
+    fn visit_binary_expr(&mut self, token: &Token, left: &Expr, right: &Expr) -> Result<(), Error> {
+        left.accept(self)?;
+        right.accept(self)?;
+        use TokenData::*;
+        match token.t {
+            NotEquals => {self.bytecode.push(Operation::Not); Ok(self.bytecode.push(Operation::Equals))},
+            EqualsEquals => Ok(self.bytecode.push(Operation::Equals)),
+            Smaller => Ok(self.bytecode.push(Operation::Smaller)),
+            SmallerOrEquals => Ok(self.bytecode.push(Operation::SmallerOrEquals)),
+            Greater => Ok(self.bytecode.push(Operation::Greater)),
+            GreaterOrEquals => Ok(self.bytecode.push(Operation::GreaterOrEquals)),
+            And => Ok(self.bytecode.push(Operation::And)),
+            Or => Ok(self.bytecode.push(Operation::Or)),
+            Minus => Ok(self.bytecode.push(Operation::Subtract)),
+            Plus => Ok(self.bytecode.push(Operation::Add)),
+            Slash => Ok(self.bytecode.push(Operation::Multiply)),
+            Star => Ok(self.bytecode.push(Operation::Divide)),
+            _ => Err(token.to_err("Unsupported binary expression token.").into())
+        }
+    }
+
+    fn visit_grouping_expr(&mut self, _: &Token, group: &Expr) -> Result<(), Error> {
+        group.accept(self)
+    }
+
+    fn visit_literal_expr(&mut self, token: &Token, data:&tokens::Literal) -> Result<(), Error> {
+        match data {
+            tokens::Literal::I(i) => Ok(self.bytecode.push(Operation::Push(Literal::I(*i)))),
+            tokens::Literal::F(f) => Ok(self.bytecode.push(Operation::Push(Literal::F(*f)))),
+            tokens::Literal::B(b) => Ok(self.bytecode.push(Operation::Push(Literal::B(*b)))),
+            tokens::Literal::S(_) => Err(token.to_err("Unexpected string literal.").into()),
+        }
+    }
+
+    fn visit_variable_expr(&mut self, var_path:&[Token]) -> Result<(), Error> {
+        if var_path.len() == 1 {
+            if let TokenData::Label(ref s) = var_path[0].t {
+                if self.blackboard_mapping.contains_key(s) {
+                    Ok(self.bytecode.push(Operation::ReadBlackboard(self.blackboard_mapping[s])))
+                } else {
+                    let idx = self.get_varpath_state_idx(var_path);
+                    Ok(self.bytecode.push(Operation::ReadState(idx)))
+                }
+            } else {
+                Err(var_path[0].to_err("Expected label.").into())
+            }
+        } else {
+            let idx = self.get_varpath_state_idx(var_path);
+            Ok(self.bytecode.push(Operation::ReadState(idx)))
+        }
+    }
+
+    fn visit_unary_expr(&mut self, token: &Token, right: &Expr) -> Result<(), Error> {
+        match token.t {
+            TokenData::Not => {right.accept(self)?; Ok(self.bytecode.push(Operation::Not))}
+            _ => Err(token.to_err("Unsupported unary operation.").into())
+        }
+    }
+
+    fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr) -> Result<(), Error> {
+        left.accept(self)?;
+        if self.bytecode.last().and_then(|op| Some(if let Operation::CallOperator(_,_) = op { true } else { false })).unwrap() {
+            let idx = self.get_varpath_blackboard_idx(var_path);
+            Ok(self.bytecode.push(Operation::WriteBlackboard(idx)))
+        } else {
+            let idx = self.get_varpath_state_idx(var_path);
+            Ok(self.bytecode.push(Operation::WriteState(idx)))
+        }
+    }
+
+    fn visit_call_expr(&mut self, _token: &Token, name:&str, args:&[Expr]) -> Result<(), Error> {
+        args.iter().try_for_each(|arg| arg.accept(self))?;
+        if self.task_mapping.contains_key(name) {
+            Ok(self.bytecode.push(Operation::PlanTask(self.task_mapping[name])))
+        } else {
+            if self.operator_mapping.contains_key(name) {
+                Ok(self.bytecode.push(Operation::CallOperator(self.operator_mapping[name], args.len())))
+            } else {
+                let idx = self.operator_mapping.len();
+                self.operator_mapping.insert(name.to_owned(), idx);
+                Ok(self.bytecode.push(Operation::CallOperator(idx, args.len())))
+            }
+        }
+    }
+
+    fn visit_nop_expr(&mut self, _: &Token) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+
+
+impl StatementVisitor<(), Error> for Domain {
+    fn visit_method(&mut self, token:&Token, name:&str, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, else_cost:Option<i32>, else_body:Option<&Stmt>) -> Result<(), Error> {
+        self.method_ids.insert(name.to_owned(), self.method_ids.len()).and_then(|_| Some(Err(token.to_err("Duplicate method name.")))).unwrap_or(Ok(()))?;
+        preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(Literal::B(true)))))?;
+        let preconditions = mem::take(&mut self.compiler.bytecode);
+        body.accept(self)?;
+        let body = mem::take(&mut self.compiler.bytecode);
+        let effects = Vec::new();
+        if let Some(else_body) = else_body {
+            let mut else_conditions = preconditions.clone();
+            self.methods.push(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects});
+            else_conditions.push(Operation::Not);
+            self.method_ids.insert("Dont".to_owned() + name, self.method_ids.len()).and_then(|_| Some(Err(token.to_err("Duplicate generated method name. Else methods are automatically named DontMethod.")))).unwrap_or(Ok(()))?;
+            else_body.accept(self)?;
+            let body = mem::take(&mut self.compiler.bytecode);
+            let effects = Vec::new();
+            self.methods.push(PrimitiveTask{preconditions:else_conditions, cost:else_cost.unwrap_or(0), body, effects})
+        } else {
+            self.methods.push(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects});
+        }
+        Ok(())
+    }
+
+    fn visit_task(&mut self, token:&Token, name:&str, binding:Option<&Binding>, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, effects:Option<&Stmt>) -> Result<(), Error> {
+        if self.pass_count == 0 { // on the first pass we figure out task name mapping only, so that we can differentiate between operators and tasks
+            let task_id = self.compiler.task_mapping.len();
+            self.compiler.task_mapping.insert(name.to_owned(), task_id).and_then(|_| Some(Err(token.to_err("Duplicate task name.")))).unwrap_or(Ok(()))?;
+            if name == "Main" {
+                self.main_id = Some(task_id);
+            }
+            Ok(())
+        } else {
+            if let Some(Binding{class_type, variable_name}) = binding {
+                self.compiler.substitution = Some(variable_name.clone());
+                for n in 0..self.type_counts[class_type] {
+                    self.compiler.substitution_count = n;
+                    self.build_task(preconditions, cost, body, effects)?;
+                }
+                Ok(())
+            } else {
+                self.compiler.substitution = None;
+                self.build_task(preconditions, cost, body, effects)
+            }
+            
         }
         
+
     }
 
-    pub fn get_main(&self) -> &Stmt {
-        self.tasks.get(self.main_id.unwrap()).unwrap()
-    } 
+    fn visit_block(&mut self, block:&[Stmt]) -> Result<(), Error> {
+        block.iter().try_for_each(|stmt| stmt.accept(self))
+    }
 
-    pub fn get_enablers_of(&self, key:&str) -> Vec<&str> {
-        if let Some(v) = self.neighbors.get(key) {
-            let r:Vec<&str> = v.iter().map(|i| i.as_str()).collect();
-            r
+    fn visit_expression(&mut self, expr:&Expr) -> Result<(), Error> {
+        expr.accept(&mut self.compiler)
+    }
+
+    fn visit_include(&mut self, token:&Token, filepath:&str) -> Result<(), Error> {
+        todo!()
+    }
+}
+
+
+
+impl Domain {
+    fn build_task(&mut self, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, effects:Option<&Stmt>) -> Result<(), Error> {
+        preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(Literal::B(true)))))?;
+        let preconditions = mem::take(&mut self.compiler.bytecode);
+        effects.and_then(|stmt| Some(stmt.accept(self))).unwrap_or(Ok(()))?;
+        let effects = mem::take(&mut self.compiler.bytecode);
+        body.accept(self)?;
+        if self.methods.len() > 0 {
+            if self.compiler.bytecode.len() > 0 {
+                return Err(body.to_err("Can not use methods and operators at the same time in this task.").into())
+            }
+            let body = mem::take(&mut self.methods);
+            let task_ids = mem::take(&mut self.method_ids);
+            self.tasks.push(Task::Complex(ComplexTask{preconditions, cost:cost.unwrap_or(0), body, effects, task_ids}))
         } else {
-            self.get_all_task_names().collect()
+            let body = mem::take(&mut self.compiler.bytecode);
+            self.tasks.push(Task::Primitive(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects}))
+        }
+        Ok(())
+    }
+    fn build_neighbor_map(&mut self) {
+        for (i, x) in self.tasks.iter().enumerate() {
+            let effects = x.get_state_effects();
+            let mut to_vec = Vec::new();
+            for (iy, y) in self.tasks.iter().enumerate() {
+                if iy != i {
+                    if effects.intersection(&y.get_state_depends()).count() > 0 {
+                        to_vec.push(iy)
+                    }
+                }
+            }
+            self.neighbors.insert(i, to_vec);
         }
     }
 
-    pub fn get_all_task_names(&self) -> impl Iterator<Item = &str> {
-        self.task_ids.keys().map(|key| key.as_str())
-    }
-
-    pub fn wrapper(filepath:&str) -> Result<Domain, Error> {
+    pub fn wrapper(filepath:&str, type_counts:HashMap<String, usize>) -> Result<Domain, Error> {
         let content = fs::read_to_string(filepath)?;
         let ast = Parser::parse(content.as_str())?;
-        let mut tasks = Vec::<Stmt>::new();
-        for stmt in ast {
-            if stmt.is_task() {
-                tasks.push(stmt)
-            } else if let Some(s) =  stmt.is_include()? {
-                let subdomain = match Domain::from_file(s.as_str()) {
-                    Ok(r) => Ok(r),
-                    Err(e) => Err(Error::Domain(String::new(), Box::new(e))),
-                }?;
-                tasks.extend(subdomain.tasks);
-            }
-        }
-
-        let mut task_ids = HashMap::new();
-        let mut main_id = None;
-        for (idx, stmt) in tasks.iter().enumerate() {
-            let name = stmt.name()?;
-            if name == "Main" {
-                main_id = Some(idx);
-            }
-            if let Some(t) = task_ids.insert(String::from(name), idx) {
-                return Err(Error::Parser(String::new(), vec![stmt.to_err(String::from("Multiple definitions of this task."))]))
-            }
-        }
-        let neighbors = Domain::get_neighbors(&tasks)?;
-        let variable_ids = Domain::variable_strings_to_ids(&mut tasks)?;
-        let domain = Domain{tasks, task_ids, main_id, variable_ids, filepath:String::from(filepath), neighbors};
+        let mut domain = Domain{filepath:String::from(filepath), type_counts, tasks:Vec::new(), compiler:ExpressionCompiler::new(), methods:Vec::new(), method_ids:HashMap::new(), neighbors:HashMap::new(), pass_count:0, main_id:None};
+        ast.iter().try_for_each(|s| s.accept(&mut domain))?;
+        domain.pass_count += 1;
+        ast.iter().try_for_each(|s| s.accept(&mut domain))?;
+        domain.build_neighbor_map();
         Ok(domain)
     }
        
-    pub fn from_file(filepath:&str) -> Result<Domain, Error> {   
-        match Domain::wrapper(filepath) {
+    pub fn from_file(filepath:&str, type_counts:HashMap<String, usize>) -> Result<Domain, Error> {   
+        match Domain::wrapper(filepath, type_counts) {
             Ok(r) => Ok(r),
             Err(mut e) => {if !e.has_path() { e.set_path(filepath); } Err(e)} 
         }

@@ -1,7 +1,5 @@
 
-use crate::htn::parser::LabelToken;
-
-use super::parser::{self, Expr, Error, TokenData};
+use super::parser::{self, expression::Expr, Error, tokens::{TokenData, Literal}};
 
 #[derive(Clone, Debug, std::hash::Hash, std::cmp::PartialEq, std::cmp::PartialOrd, std::cmp::Eq, std::cmp::Ord)]
 pub struct State<T>(Vec<T>);
@@ -51,7 +49,7 @@ impl<T> Evaluatable<T> for Expr where T: Copy + Default +
         std::cmp::PartialEq +
         std::cmp::PartialOrd +
         std::convert::From<bool> + 
-        std::convert::From<parser::Literal> + 
+        std::convert::From<Literal> + 
         std::ops::Sub<Output = T> + 
         std::ops::Add<Output = T> + 
         std::ops::Div<Output = T> + 
@@ -60,46 +58,48 @@ impl<T> Evaluatable<T> for Expr where T: Copy + Default +
         std::ops::BitAnd<Output = T> + 
         std::ops::Not<Output = T> {
     fn eval(&self, state:&State<T>) -> Result<T, Error> {
+        todo!();
         use TokenData::*;
-        match self {
-            Self::Binary(left, op, right) => {
-                let left = left.eval(state)?;
-                let right = right.eval(state)?;
-                match op.t {
-                    EqualsEquals => Ok((left == right).into()),
-                    Minus => Ok(left - right),
-                    Plus => Ok(left + right),
-                    Slash => Ok(left / right),
-                    Star => Ok(left * right),
-                    Greater => Ok((left > right).into()),
-                    Smaller => Ok((left < right).into()),
-                    GreaterOrEquals => Ok((left >= right).into()),
-                    SmallerOrEquals => Ok((left <= right).into()),
-                    NotEquals => Ok((left != right).into()),
-                    Or => Ok(left | right),
-                    And => Ok(left & right),
-                    _ => Err(self.to_err(String::from("Unsupported operation."))),
-                }
-            },
-            Self::Grouping(g, _) => Ok(g.eval(state)?),
-            Self::Literal(val, _) => Ok((val.clone()).into()),
-            Self::Variable(LabelToken{idx:Some(var),..}) => Ok(state.get(*var)),
-            Self::Variable(LabelToken{idx:None,..}) => Err(self.to_err(String::from("Variable has not been converted to a state index"))),
-            Self::Unary(op, right) => if let Not = op.t { Ok(!right.eval(state)?)  } else { 
-                Err(self.to_err(String::from("Unexpected unary operator.")))
-            },
-            Self::Call(_, _) | 
-            Self::Assignment(_,_) |
-            Self::Noop(_) => Err(self.to_err(String::from("Unable to evaluate this expression."))),
-        }
+        // match self {
+        //     Self::Binary(left, op, right) => {
+        //         let left = left.eval(state)?;
+        //         let right = right.eval(state)?;
+        //         match op.t {
+        //             EqualsEquals => Ok((left == right).into()),
+        //             Minus => Ok(left - right),
+        //             Plus => Ok(left + right),
+        //             Slash => Ok(left / right),
+        //             Star => Ok(left * right),
+        //             Greater => Ok((left > right).into()),
+        //             Smaller => Ok((left < right).into()),
+        //             GreaterOrEquals => Ok((left >= right).into()),
+        //             SmallerOrEquals => Ok((left <= right).into()),
+        //             NotEquals => Ok((left != right).into()),
+        //             Or => Ok(left | right),
+        //             And => Ok(left & right),
+        //             _ => Err(self.to_err(String::from("Unsupported operation."))),
+        //         }
+        //     },
+        //     Self::Grouping(g, _) => Ok(g.eval(state)?),
+        //     Self::Literal(val, _) => Ok((val.clone()).into()),
+        //     Self::Variable(LabelToken{idx:Some(var),..}) => Ok(state.get(*var)),
+        //     Self::Variable(LabelToken{idx:None,..}) => Err(self.to_err(String::from("Variable has not been converted to a state index"))),
+        //     Self::Unary(op, right) => if let Not = op.t { Ok(!right.eval(state)?)  } else { 
+        //         Err(self.to_err(String::from("Unexpected unary operator.")))
+        //     },
+        //     Self::Call(_, _) | 
+        //     Self::Assignment(_,_) |
+        //     Self::Noop(_) => Err(self.to_err(String::from("Unable to evaluate this expression."))),
+        // }
     }
 
     fn eval_mut(&self, state:&mut State<T>) -> Result<(), Error> {
-        match self {
-            Self::Assignment(LabelToken{idx:Some(var),..}, right) => {let r = right.eval(state)?; state.set(*var, r); Ok(())},
-            Self::Noop(_) => Ok(()),
-            _ => Err(self.to_err(String::from("This expression is not an assignment.")))
-        }
+        todo!();
+        // match self {
+        //     Self::Assignment(LabelToken{idx:Some(var),..}, right) => {let r = right.eval(state)?; state.set(*var, r); Ok(())},
+        //     Self::Noop(_) => Ok(()),
+        //     _ => Err(self.to_err(String::from("This expression is not an assignment.")))
+        // }
     }
 
     
@@ -161,13 +161,13 @@ impl From<bool> for StateType {
     }
 }
 
-impl From<parser::Literal> for StateType {
-    fn from(l: parser::Literal) -> Self {
+impl From<Literal> for StateType {
+    fn from(l: Literal) -> Self {
         match l {
-            parser::Literal::I(i) => Self::I(i),
-            parser::Literal::F(f) => Self::F(f),
-            parser::Literal::B(b) => Self::B(b),
-            parser::Literal::S(_) => panic!("String literals can not be part of state.")
+            Literal::I(i) => Self::I(i),
+            Literal::F(f) => Self::F(f),
+            Literal::B(b) => Self::B(b),
+            Literal::S(_) => panic!("String literals can not be part of state.")
         }
     }
 }
