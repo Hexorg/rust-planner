@@ -393,7 +393,14 @@ impl StatementVisitor<(), Error> for Domain {
     }
 
     fn visit_include(&mut self, token:&Token, filepath:&str) -> Result<(), Error> {
-        todo!()
+        if self.pass_count == 0 {
+            match self.compile(filepath) {
+                Ok(_) => Ok(()),
+                Err(mut e) => {if !e.has_path() { e.set_path(filepath); } Err(e)} 
+            }    
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -434,21 +441,24 @@ impl Domain {
         }
     }
 
-    pub fn wrapper(filepath:&str, type_counts:HashMap<String, usize>) -> Result<Domain, Error> {
+    fn compile(&mut self, filepath:&str) -> Result<(), Error> {
         let content = fs::read_to_string(filepath)?;
         let ast = Parser::parse(content.as_str())?;
-        let mut domain = Domain{filepath:String::from(filepath), type_counts, tasks:Vec::new(), compiler:ExpressionCompiler::new(), methods:Vec::new(), method_ids:HashMap::new(), neighbors:HashMap::new(), pass_count:0, main_id:None};
-        ast.iter().try_for_each(|s| s.accept(&mut domain))?;
-        domain.pass_count += 1;
-        ast.iter().try_for_each(|s| s.accept(&mut domain))?;
-        domain.build_neighbor_map();
-        Ok(domain)
+        let current_pass_count = self.pass_count;
+        self.pass_count = 0;
+        ast.iter().try_for_each(|s| s.accept(self))?;
+        self.pass_count = 1;
+        ast.iter().try_for_each(|s| s.accept(self))?;
+        self.pass_count = current_pass_count;
+        Ok(())
     }
        
     pub fn from_file(filepath:&str, type_counts:HashMap<String, usize>) -> Result<Domain, Error> {   
-        match Domain::wrapper(filepath, type_counts) {
-            Ok(r) => Ok(r),
-            Err(mut e) => {if !e.has_path() { e.set_path(filepath); } Err(e)} 
+        let mut domain = Domain{filepath:String::from(filepath), type_counts, tasks:Vec::new(), compiler:ExpressionCompiler::new(), methods:Vec::new(), method_ids:HashMap::new(), neighbors:HashMap::new(), pass_count:0, main_id:None};
+
+        match domain.compile(filepath) {
+            Ok(_) => Ok(domain),
+            Err(mut e) => {if !e.has_path() { e.set_path(filepath); } Err(Error::Domain(filepath.to_owned(), Box::new(e)))} 
         }
     }
 }

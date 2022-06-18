@@ -1,6 +1,8 @@
 task Main(cell5 & cell6):
     complete()
 
+include "htn-problems/testing.htn"
+
 task Pickup1(cell1 & !cell2 & !carry):
     carry = pikcup(cell1)
 effects:
