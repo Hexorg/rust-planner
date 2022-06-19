@@ -469,9 +469,11 @@ impl StatementVisitor<(), Error> for Domain {
     }
 
     fn visit_type(&mut self, _token:&Token, name:&str, body:&Stmt) -> Result<(), Error> {
-        self.compiler.is_class_definition = Some(String::from(name));
-        body.accept(self)?;
-        self.compiler.is_class_definition = None;
+        if self.pass_count == 0 {
+            self.compiler.is_class_definition = Some(String::from(name));
+            body.accept(self)?;
+            self.compiler.is_class_definition = None;
+        }
         Ok(())
     }
 
