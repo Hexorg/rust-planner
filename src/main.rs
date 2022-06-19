@@ -10,7 +10,7 @@ use htn::planner::Planner;
 fn main() {
     let mut type_counts = HashMap::<String, usize>::new();
     type_counts.insert("Cell".to_owned(), 7);
-    let domain = match Domain::from_file("htn-problems/sample.htn", type_counts) {
+    let domain = match Domain::from_file("htn-problems/Stacking_typed.htn", type_counts) {
         Ok(domain) => domain,
         Err(e) => {eprintln!("{}", e); panic!()},
     };
@@ -23,8 +23,9 @@ fn main() {
     let mut state = planner.new_state();
     use OperandType::*;
     state.set(*vid.get("carry").unwrap(), B(false));
+    state.set(*vid.get("cell0").unwrap(), B(true));
     state.set(*vid.get("cell1").unwrap(), B(true));
-    state.set(*vid.get("cell2").unwrap(), B(true));
+    state.set(*vid.get("cell2").unwrap(), B(false));
     state.set(*vid.get("cell3").unwrap(), B(false));
     state.set(*vid.get("cell4").unwrap(), B(false));
     state.set(*vid.get("cell5").unwrap(), B(false));

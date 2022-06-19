@@ -1,0 +1,14 @@
+task Main(cell5 & cell6):
+    complete()
+
+task Pickup(cell & !carry) on Cell as cell:
+    carry = pickup(cell)
+effects:
+    cell = false
+    carry = true
+
+task Dropoff(!cell & carry) on Cell as cell:
+    dropoff(carry)
+effects:
+    cell = true
+    carry = false
