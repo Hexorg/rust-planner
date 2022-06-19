@@ -115,6 +115,7 @@ impl Lexer {
                                             "not" => Some(Not),
                                             "on" => Some(On),
                                             "as" => Some(As),
+                                            "type" => Some(Type),
                                             "false" => Some(Literal(self::Literal::B(false))),
                                             "true" => Some(Literal(self::Literal::B(true))),
                                             _ => { if label.contains('.') { 

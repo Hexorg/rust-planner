@@ -15,6 +15,7 @@ pub trait StatementVisitor<T, E> {
     fn visit_block(&mut self, block:&[Stmt]) -> Result<T, E>;
     fn visit_expression(&mut self, expr:&Expr) -> Result<T, E>;
     fn visit_include(&mut self, token:&Token, filepath:&str) -> Result<T, E>;
+    fn visit_type(&mut self, token:&Token, name:&str, body:&Stmt) -> Result<T, E>;
 }
 
 pub enum Stmt {
@@ -34,9 +35,13 @@ pub enum Stmt {
         binding:Option<Binding>,
         effects:Option<Box<Stmt>>, 
     }, 
+    Type{
+        name: Token,
+        body:Box<Stmt>,
+    },
     Block(Vec<Stmt>),
     Expression(Expr),
-    Include(Token)
+    Include(Token),
 }
 
 pub struct StmtFormatter<'a, 'b> {
@@ -93,11 +98,17 @@ impl StatementVisitor<(), std::fmt::Error> for StmtFormatter<'_, '_> {
     }
 
     fn visit_expression(&mut self, expr:&Expr) -> std::fmt::Result {
-        writeln!(self.f, "{:>depth$}{}", ' ', expr, depth=self.depth)
+        writeln!(self.f, "{:>depth$}{}", "", expr, depth=self.depth)
     }
 
     fn visit_include(&mut self, _:&Token, filepath:&str) -> std::fmt::Result {
-        write!(self.f, "{:>depth$}include \"{}\"", ' ', filepath, depth=self.depth)
+        write!(self.f, "{:>depth$}include \"{}\"", "", filepath, depth=self.depth)
+    }
+
+    fn visit_type(&mut self, _token:&Token, name:&str, body:&Stmt) -> std::fmt::Result {
+        writeln!(self.f, "{:>depth$}type {}:", "", name, depth=self.depth)?;
+        body.accept(self)
+
     }
 }
 
@@ -108,6 +119,7 @@ impl Stmt {
             Stmt::Task { name:token @ Token{t:TokenData::Label(name),..}, preconditions, cost, body, binding, effects } => visitor.visit_task(token, name, binding.as_ref(), preconditions.as_ref(), *cost, body, effects.as_deref()),
             Stmt::Block(v) => visitor.visit_block(v),
             Stmt::Expression(expr) => visitor.visit_expression(expr),
+            Stmt::Type{name:token@Token{t:TokenData::Label(name),..}, body} => visitor.visit_type(token, name, body),
             Stmt::Include(token @ Token{t:TokenData::Literal(Literal::S(path)),..}) => visitor.visit_include(token, path),
             _ => panic!("Unexpected statement structure. Mut be a bug in code by this point.")
         }
@@ -115,7 +127,8 @@ impl Stmt {
     pub fn to_err(&self, msg:&str) -> Error {
         match self {
             Stmt::Method{name,..} |
-            Stmt::Task{name,..} => name.to_err(msg),
+            Stmt::Task{name,..} |
+            Stmt::Type{name,..} => name.to_err(msg),
             Stmt::Block(blk) => blk.first().expect("Unable to generate error for empty block.").to_err(msg),
             Stmt::Expression(e) => e.to_err(msg),
             Stmt::Include(e) => e.to_err(msg),

@@ -8,9 +8,9 @@ use htn::planner::Planner;
 
 
 fn main() {
-    let mut type_counts = HashMap::<String, usize>::new();
-    type_counts.insert("Cell".to_owned(), 7);
-    let domain = match Domain::from_file("htn-problems/Stacking_typed.htn", type_counts) {
+    let type_map = HashMap::<&str, Vec<&str>>::new();
+    //type_map.insert("Cell", vec!["cell0", "cell1", "cell2", "cell3", "cell4", "cell5", "cell6"]);
+    let domain = match Domain::from_file("htn-problems/Stacking_typed.htn", type_map) {
         Ok(domain) => domain,
         Err(e) => {eprintln!("{}", e); panic!()},
     };

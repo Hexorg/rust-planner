@@ -120,9 +120,11 @@ impl Task {
 
 struct ExpressionCompiler {
     pub bytecode:Vec<Operation>,
-    pub substitution: Option<String>,
-    pub substitution_count: usize,
+    pub type_map: HashMap<String, Vec<String>>,
+    pub binding: Option<Binding>,
+    pub substitution_id: usize,
     pub is_body: bool,
+    pub is_class_definition: Option<String>,
     pub state_mapping:HashMap<String, usize>,
     pub blackboard_mapping:HashMap<String, usize>,
     pub operator_mapping:HashMap<String, usize>,
@@ -138,7 +140,6 @@ pub struct Domain {
     main_id: Option<usize>,
     compiler: ExpressionCompiler,
     pass_count: usize,
-    type_counts:HashMap<String, usize>,
     methods: Vec<PrimitiveTask>,    
 }
 
@@ -235,46 +236,77 @@ impl std::fmt::Debug for Domain {
 
 impl ExpressionCompiler {
     pub fn new() -> Self {
-        Self { bytecode: Vec::new(), state_mapping: HashMap::new(), blackboard_mapping: HashMap::new(), is_body:false, operator_mapping: HashMap::new(), task_mapping:HashMap::new(), substitution:None, substitution_count:0}
+        Self { bytecode: Vec::new(), 
+            state_mapping: HashMap::new(), 
+            blackboard_mapping: HashMap::new(), 
+            is_body:false, 
+            is_class_definition:None,
+            operator_mapping: HashMap::new(), 
+            task_mapping:HashMap::new(), 
+            type_map:HashMap::new(), 
+            binding: None,
+            substitution_id:0}
     }
     #[inline]
-    fn get_varpath_state_idx(&mut self, var_path:&[Token]) -> usize {
+    fn get_varpath_state_idx(&mut self, var_path:&[Token]) -> Result<usize, Error> {
         let mut iter = var_path.iter();
-
-        let first = iter.by_ref().take(1).map(|t| {
+        let first = iter.by_ref().take(1).map(|t| -> Result<String, Error> {
                 if let Token{t:TokenData::Label(s),..} = t {
-                    if let Some(sub) = &self.substitution {
-                        if s == sub {
-                            format!("{}{}", sub, self.substitution_count)
+                    if let Some(Binding{class_type, variable_name}) = &self.binding {
+                        if s == variable_name {
+                            if self.type_map.contains_key(class_type) {
+                                Ok(self.type_map.get(class_type).unwrap()[self.substitution_id].clone())
+                            } else {
+                                Err(t.to_err("Undefined class.").into())
+                            }
                         } else {
-                            s.clone()
+                            Ok(s.clone())
                         }
                     } else {
-                        s.clone()
+                        Ok(s.clone())
                     }
                 } else {
-                    "Default".to_owned()
+                    Ok("Default".to_owned())
                 }
-            }).fold(String::new(), |acc, item| acc + item.as_str());
-
+            }).fold(Ok(String::new()), |acc, item| {let acc = acc?; match &item { Ok(s) => { Ok(acc + s) }, Err(_) => item}})?;
         let vname = iter.map(|t| if let TokenData::Label(s) = &t.t { s.as_str() } else { "" }).fold(first, |acc,item| acc + "." + item);
         if self.state_mapping.contains_key(&vname) {
-            self.state_mapping[&vname]
+            Ok(self.state_mapping[&vname])
         } else {
             let s = self.state_mapping.len();
             self.state_mapping.insert(vname, s);
-            s
+            Ok(s)
         }
     }
     #[inline]
-    fn get_varpath_blackboard_idx(&mut self, var_path:&[Token]) -> usize {
-        let vname = var_path.iter().map(|t| if let TokenData::Label(s) = &t.t { s.as_str() } else { "" }).fold(String::new(), |acc,item| acc + "." + item);
+    fn get_varpath_blackboard_idx(&mut self, var_path:&[Token]) -> Result<usize, Error> {
+        let mut iter = var_path.iter();
+        let first = iter.by_ref().take(1).map(|t| -> Result<String, Error> {
+                if let Token{t:TokenData::Label(s),..} = t {
+                    if let Some(Binding{class_type, variable_name}) = &self.binding {
+                        if s == variable_name {
+                            if self.type_map.contains_key(class_type) {
+                                Ok(self.type_map.get(class_type).unwrap()[self.substitution_id].clone())
+                            } else {
+                                Err(t.to_err("Undefined class.").into())
+                            }
+                        } else {
+                            Ok(s.clone())
+                        }
+                    } else {
+                        Ok(s.clone())
+                    }
+                } else {
+                    Ok("Default".to_owned())
+                }
+            }).fold(Ok(String::new()), |acc, item| {let acc = acc?; match &item { Ok(s) => { Ok(acc + s) }, Err(_) => item}})?;
+        let vname = iter.map(|t| if let TokenData::Label(s) = &t.t { s.as_str() } else { "" }).fold(first, |acc,item| acc + "." + item);
         if self.blackboard_mapping.contains_key(&vname) {
-            self.blackboard_mapping[&vname]
+            Ok(self.blackboard_mapping[&vname])
         } else {
             let s = self.blackboard_mapping.len();
             self.blackboard_mapping.insert(vname, s);
-            s
+            Ok(s)
         }
     }
 }
@@ -316,10 +348,25 @@ impl ExpressionVisitor<(), Error> for ExpressionCompiler {
 
     fn visit_variable_expr(&mut self, var_path:&[Token]) -> Result<(), Error> {
         if self.is_body {
-            let idx = self.get_varpath_blackboard_idx(var_path);
+            let idx = self.get_varpath_blackboard_idx(var_path)?;
             Ok(self.bytecode.push(Operation::ReadBlackboard(idx)))
+        } else if let Some(class) = &self.is_class_definition { 
+            if !self.type_map.contains_key(class) {
+                self.type_map.insert(class.clone(), Vec::new());
+            }
+            if var_path.len() == 1 {
+                if let TokenData::Label(s) = &var_path[0].t {
+                    self.type_map.get_mut(class).unwrap().push(s.clone());
+                    Ok(())
+                } else {
+                    Err(var_path[0].to_err("Expected label.").into())
+                }
+                
+            } else {
+                Err(var_path[0].to_err("Object properties are not allowed in type definition").into())
+            }
         } else {
-            let idx = self.get_varpath_state_idx(var_path);
+            let idx = self.get_varpath_state_idx(var_path)?;
             Ok(self.bytecode.push(Operation::ReadState(idx)))
         }
     }
@@ -334,10 +381,10 @@ impl ExpressionVisitor<(), Error> for ExpressionCompiler {
     fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr) -> Result<(), Error> {
         left.accept(self)?;
         if self.is_body {
-            let idx = self.get_varpath_blackboard_idx(var_path);
+            let idx = self.get_varpath_blackboard_idx(var_path)?;
             Ok(self.bytecode.push(Operation::WriteBlackboard(idx)))
         } else {
-            let idx = self.get_varpath_state_idx(var_path);
+            let idx = self.get_varpath_state_idx(var_path)?;
             Ok(self.bytecode.push(Operation::WriteState(idx)))
         }
     }
@@ -397,14 +444,17 @@ impl StatementVisitor<(), Error> for Domain {
             Ok(())
         } else {
             if let Some(Binding{class_type, variable_name}) = binding {
-                self.compiler.substitution = Some(variable_name.clone());
-                for n in 0..self.type_counts[class_type] {
-                    self.compiler.substitution_count = n;
+                self.compiler.binding = Some(Binding{class_type:class_type.clone(), variable_name:variable_name.clone()});
+                let count = if let Some(v) = self.compiler.type_map.get(class_type) { v.len() } else {
+                    return Err(token.to_err("Undefined binding class in this task.").into());
+                };
+                for n in 0..count {
+                    self.compiler.substitution_id = n;
                     self.build_task(preconditions, cost, body, effects)?;
                 }
                 Ok(())
             } else {
-                self.compiler.substitution = None;
+                self.compiler.binding = None;
                 self.build_task(preconditions, cost, body, effects)
             }   
         }
@@ -416,6 +466,13 @@ impl StatementVisitor<(), Error> for Domain {
 
     fn visit_expression(&mut self, expr:&Expr) -> Result<(), Error> {
         expr.accept(&mut self.compiler)
+    }
+
+    fn visit_type(&mut self, _token:&Token, name:&str, body:&Stmt) -> Result<(), Error> {
+        self.compiler.is_class_definition = Some(String::from(name));
+        body.accept(self)?;
+        self.compiler.is_class_definition = None;
+        Ok(())
     }
 
     fn visit_include(&mut self, _token:&Token, filepath:&str) -> Result<(), Error> {
@@ -505,8 +562,13 @@ impl Domain {
         container
     }
        
-    pub fn from_file(filepath:&str, type_counts:HashMap<String, usize>) -> Result<Domain, Error> {   
-        let mut domain = Domain{filepath:String::from(filepath), type_counts, tasks:Vec::new(), compiler:ExpressionCompiler::new(), methods:Vec::new(), neighbors:HashMap::new(), pass_count:0, main_id:None};
+    pub fn from_file(filepath:&str, type_counts:HashMap<&str, Vec<&str>>) -> Result<Domain, Error> {   
+        let mut type_map = HashMap::<String, Vec<String>>::new();
+        type_map.extend(type_counts.iter().map(|(k, v)| (String::from(*k), v.iter().map(|s| String::from(*s)).collect())));
+
+        let mut compiler = ExpressionCompiler::new();
+        compiler.type_map = type_map;
+        let mut domain = Domain{filepath:String::from(filepath), tasks:Vec::new(), compiler, methods:Vec::new(), neighbors:HashMap::new(), pass_count:0, main_id:None};
 
         match domain.compile(filepath, false) {
             Ok(_) => {domain.build_neighbor_map(); Ok(domain)},

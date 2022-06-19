@@ -1,3 +1,12 @@
+type Cell:
+    cell0
+    cell1
+    cell2
+    cell3
+    cell4
+    cell5
+    cell6
+    
 task Main(cell5 & cell6):
     complete()
 
@@ -8,7 +17,7 @@ effects:
     carry = true
 
 task Dropoff(!cell & carry) on Cell as cell:
-    dropoff(carry)
+    dropoff(cell, carry)
 effects:
     cell = true
     carry = false

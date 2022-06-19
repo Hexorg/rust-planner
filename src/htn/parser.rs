@@ -330,6 +330,13 @@ impl Parser {
         self.idx += 1;
         pexpect!(self, TokenData::StatementEnd, {Stmt::Include(t)}, "Expected new line after expression.")
     }
+    fn type_statement(&mut self) -> Result<Stmt, Error> {
+        pexpect!(self, TokenData::Label(_), {
+            let name: Token = self.tokens[self.idx-1].clone();
+            let body = Box::new(self.parse_body()?);
+            Stmt::Type{name, body}
+        }, "Expected type name.")
+    }
     fn statement(&mut self)-> Result<Stmt, Error> {
         // println!("When Parsing a new statement, next token is {}.", self.tokens[self.idx]);
         let r = if let TokenData::Task = self.tokens[self.idx].t {
@@ -341,6 +348,9 @@ impl Parser {
         } else if let TokenData::Method = self.tokens[self.idx].t {
             self.idx += 1;
             self.method_statement()
+        } else if let TokenData::Type = self.tokens[self.idx].t {
+            self.idx += 1;
+            self.type_statement()
         } else if let TokenData::Include = self.tokens[self.idx].t {
             self.idx += 1;
             self.include_statement()
