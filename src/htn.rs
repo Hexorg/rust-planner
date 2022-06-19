@@ -1,5 +1,5 @@
 pub mod domain;
-// pub mod planner;
-pub mod interpreter;
+pub mod planner;
+pub mod vm;
 pub mod parser;
-// mod search;
+mod search;

@@ -1,5 +1,6 @@
 use super::tokens::{TokenData, Token, Literal};
-use super::{Error};
+use super::Error;
+
 enum DepthSeparator {
     TABS,
     SPACES(usize)

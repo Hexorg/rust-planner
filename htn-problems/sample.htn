@@ -1,8 +1,6 @@
 task Main(cell5 & cell6):
     complete()
 
-include "htn-problems/testing.htn"
-
 task Pickup1(cell1 & !cell2 & !carry):
     carry = pikcup(cell1)
 effects:
@@ -10,7 +8,7 @@ effects:
     carry = true
 
 task Pickup2(cell2 & !carry):
-    carry = pikcup(cell1)
+    carry = pikcup(cell2)
 effects:
     cell2 = false
     carry = true

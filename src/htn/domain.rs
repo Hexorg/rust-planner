@@ -8,18 +8,50 @@ use super::parser::statement::StatementVisitor;
 use super::parser::{Parser, statement::{Stmt, Binding}, tokens::{self, Token, TokenData}, expression::Expr};
 use super::parser;
 
-#[derive(Clone, Copy, Debug)]
-pub enum Literal {
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub enum OperandType {
     I(i32),
     F(f32),
     B(bool)
 }
 
+impl std::cmp::Eq for OperandType {
+
+}
+
+impl OperandType {
+    #[inline]
+    pub fn is_true(&self) -> bool {
+        match self {
+            Self::I(i) => *i == 1,
+            Self::B(b) => *b,
+            Self::F(_) => false
+        }
+    }
+}
+
+impl Default for OperandType {
+    fn default() -> Self {
+        Self::I(0)
+    }
+}
+
+impl std::hash::Hash for OperandType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            OperandType::I(i) => i.hash(state),
+            OperandType::F(f) => f.to_bits().hash(state),
+            OperandType::B(b) => b.hash(state),
+        }
+    }
+}
+
+
 #[derive(Clone, Copy, Debug)]
 pub enum Operation {
     ReadState(usize),
     WriteState(usize),
-    Push(Literal),
+    Push(OperandType),
     Equals,
     Greater,
     Smaller,
@@ -62,24 +94,28 @@ pub enum Task {
 impl Task {
     pub fn get_state_effects(&self) -> HashSet<usize> {
         let mut result = HashSet::new();
-        match self {
-            Self::Complex(ComplexTask{effects,..}) |
-            Self::Primitive(PrimitiveTask{effects,..}) => {
-                effects.iter().for_each(|e| if let Operation::WriteState(idx) = e { result.insert(*idx); })
-            }
-        }
+        self.effects().iter().for_each(|e| if let Operation::WriteState(idx) = e { result.insert(*idx); });
         result
     }
 
     pub fn get_state_depends(&self) -> HashSet<usize> {
         let mut result = HashSet::new();
+        self.preconditions().iter().for_each(|p| if let Operation::ReadState(idx) = p { result.insert(*idx); });
+        result
+    }
+
+    pub fn preconditions(&self) -> &Vec<Operation> {
         match self {
             Self::Complex(ComplexTask {preconditions,..}) |
-            Self::Primitive(PrimitiveTask {preconditions,..}) => {
-                preconditions.iter().for_each(|p| if let Operation::ReadState(idx) = p { result.insert(*idx); });
-            }
+            Self::Primitive(PrimitiveTask {preconditions,..}) => preconditions
         }
-        result
+    }
+
+    pub fn effects(&self) -> &Vec<Operation> {
+        match self {
+            Self::Complex(ComplexTask {effects,..}) |
+            Self::Primitive(PrimitiveTask {effects,..}) => effects
+        }
     }
 }
 
@@ -88,9 +124,10 @@ struct ExpressionCompiler {
     pub bytecode:Vec<Operation>,
     pub substitution: Option<String>,
     pub substitution_count: usize,
-    state_mapping:HashMap<String, usize>,
-    blackboard_mapping:HashMap<String, usize>,
-    operator_mapping:HashMap<String, usize>,
+    pub is_body: bool,
+    pub state_mapping:HashMap<String, usize>,
+    pub blackboard_mapping:HashMap<String, usize>,
+    pub operator_mapping:HashMap<String, usize>,
     task_mapping: HashMap<String, usize>,
 }
 
@@ -113,7 +150,8 @@ pub struct Domain {
 pub enum Error {
     IO(String, std::io::Error),
     Parser(String, Vec<parser::Error>),
-    Domain(String, Box<Error>),
+    Include(String, Box<Error>),
+    Domain(String, String),
 }
 
 
@@ -121,7 +159,8 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::IO(s, e) => write!(f, "{}: {}", s, e),
-            Self::Domain(s, e) => write!(f, "In file included from {}:\n{}", s, e),
+            Self::Domain(s, e) => write!(f, "{}: {}", s, e),
+            Self::Include(s, e) => write!(f, "In file included from {}:\n{}", s, e),
             Self::Parser(filepath, es) => {
                 let htn_source = fs::read_to_string(filepath).unwrap();
                 let mut lines = htn_source.lines();
@@ -145,17 +184,19 @@ impl std::fmt::Display for Error {
 impl Error {
     fn set_path(&mut self, filename:&str) {
         match self {
-            Error::IO(ref mut f, _) |
-            Error::Domain(ref mut f, _) |
-            Error::Parser(ref mut f, _) => f.extend(filename.chars())
+            Self::IO(ref mut f, _) |
+            Self::Domain(ref mut f, _) |
+            Self::Include(ref mut f, _) |
+            Self::Parser(ref mut f, _) => f.extend(filename.chars())
         }
     }
 
     fn has_path(&self) -> bool {
         match self {
-            Error::IO(p, _) | 
-            Error::Domain(p, _) |
-            Error::Parser(p, _) => p.len() > 0
+            Self::IO(p, _) | 
+            Self::Domain(p, _) |
+            Self::Include(p, _) |
+            Self::Parser(p, _) => p.len() > 0
         }
     }
 }
@@ -198,7 +239,7 @@ impl std::fmt::Debug for Domain {
 
 impl ExpressionCompiler {
     pub fn new() -> Self {
-        Self { bytecode: Vec::new(), state_mapping: HashMap::new(), blackboard_mapping: HashMap::new(), operator_mapping: HashMap::new(), task_mapping:HashMap::new(), substitution:None, substitution_count:0}
+        Self { bytecode: Vec::new(), state_mapping: HashMap::new(), blackboard_mapping: HashMap::new(), is_body:false, operator_mapping: HashMap::new(), task_mapping:HashMap::new(), substitution:None, substitution_count:0}
     }
     #[inline]
     fn get_varpath_state_idx(&mut self, var_path:&[Token]) -> usize {
@@ -270,25 +311,17 @@ impl ExpressionVisitor<(), Error> for ExpressionCompiler {
 
     fn visit_literal_expr(&mut self, token: &Token, data:&tokens::Literal) -> Result<(), Error> {
         match data {
-            tokens::Literal::I(i) => Ok(self.bytecode.push(Operation::Push(Literal::I(*i)))),
-            tokens::Literal::F(f) => Ok(self.bytecode.push(Operation::Push(Literal::F(*f)))),
-            tokens::Literal::B(b) => Ok(self.bytecode.push(Operation::Push(Literal::B(*b)))),
+            tokens::Literal::I(i) => Ok(self.bytecode.push(Operation::Push(OperandType::I(*i)))),
+            tokens::Literal::F(f) => Ok(self.bytecode.push(Operation::Push(OperandType::F(*f)))),
+            tokens::Literal::B(b) => Ok(self.bytecode.push(Operation::Push(OperandType::B(*b)))),
             tokens::Literal::S(_) => Err(token.to_err("Unexpected string literal.").into()),
         }
     }
 
     fn visit_variable_expr(&mut self, var_path:&[Token]) -> Result<(), Error> {
-        if var_path.len() == 1 {
-            if let TokenData::Label(ref s) = var_path[0].t {
-                if self.blackboard_mapping.contains_key(s) {
-                    Ok(self.bytecode.push(Operation::ReadBlackboard(self.blackboard_mapping[s])))
-                } else {
-                    let idx = self.get_varpath_state_idx(var_path);
-                    Ok(self.bytecode.push(Operation::ReadState(idx)))
-                }
-            } else {
-                Err(var_path[0].to_err("Expected label.").into())
-            }
+        if self.is_body {
+            let idx = self.get_varpath_blackboard_idx(var_path);
+            Ok(self.bytecode.push(Operation::ReadBlackboard(idx)))
         } else {
             let idx = self.get_varpath_state_idx(var_path);
             Ok(self.bytecode.push(Operation::ReadState(idx)))
@@ -304,7 +337,7 @@ impl ExpressionVisitor<(), Error> for ExpressionCompiler {
 
     fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr) -> Result<(), Error> {
         left.accept(self)?;
-        if self.bytecode.last().and_then(|op| Some(if let Operation::CallOperator(_,_) = op { true } else { false })).unwrap() {
+        if self.is_body {
             let idx = self.get_varpath_blackboard_idx(var_path);
             Ok(self.bytecode.push(Operation::WriteBlackboard(idx)))
         } else {
@@ -338,9 +371,11 @@ impl ExpressionVisitor<(), Error> for ExpressionCompiler {
 impl StatementVisitor<(), Error> for Domain {
     fn visit_method(&mut self, token:&Token, name:&str, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, else_cost:Option<i32>, else_body:Option<&Stmt>) -> Result<(), Error> {
         self.method_ids.insert(name.to_owned(), self.method_ids.len()).and_then(|_| Some(Err(token.to_err("Duplicate method name.")))).unwrap_or(Ok(()))?;
-        preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(Literal::B(true)))))?;
+        preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(OperandType::B(true)))))?;
         let preconditions = mem::take(&mut self.compiler.bytecode);
+        self.compiler.is_body = true;
         body.accept(self)?;
+        self.compiler.is_body = false;
         let body = mem::take(&mut self.compiler.bytecode);
         let effects = Vec::new();
         if let Some(else_body) = else_body {
@@ -377,11 +412,8 @@ impl StatementVisitor<(), Error> for Domain {
             } else {
                 self.compiler.substitution = None;
                 self.build_task(preconditions, cost, body, effects)
-            }
-            
+            }   
         }
-        
-
     }
 
     fn visit_block(&mut self, block:&[Stmt]) -> Result<(), Error> {
@@ -394,9 +426,9 @@ impl StatementVisitor<(), Error> for Domain {
 
     fn visit_include(&mut self, token:&Token, filepath:&str) -> Result<(), Error> {
         if self.pass_count == 0 {
-            match self.compile(filepath) {
+            match self.compile(filepath, true) {
                 Ok(_) => Ok(()),
-                Err(mut e) => {if !e.has_path() { e.set_path(filepath); } Err(e)} 
+                Err(mut e) => {if !e.has_path() { e.set_path(filepath); } Err(Error::Include(filepath.to_owned(), Box::new(e)))} 
             }    
         } else {
             Ok(())
@@ -408,11 +440,13 @@ impl StatementVisitor<(), Error> for Domain {
 
 impl Domain {
     fn build_task(&mut self, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, effects:Option<&Stmt>) -> Result<(), Error> {
-        preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(Literal::B(true)))))?;
+        preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(OperandType::B(true)))))?;
         let preconditions = mem::take(&mut self.compiler.bytecode);
         effects.and_then(|stmt| Some(stmt.accept(self))).unwrap_or(Ok(()))?;
         let effects = mem::take(&mut self.compiler.bytecode);
+        self.compiler.is_body = true;
         body.accept(self)?;
+        self.compiler.is_body = false;
         if self.methods.len() > 0 {
             if self.compiler.bytecode.len() > 0 {
                 return Err(body.to_err("Can not use methods and operators at the same time in this task.").into())
@@ -441,7 +475,7 @@ impl Domain {
         }
     }
 
-    fn compile(&mut self, filepath:&str) -> Result<(), Error> {
+    fn compile(&mut self, filepath:&str, is_include:bool) -> Result<(), Error> {
         let content = fs::read_to_string(filepath)?;
         let ast = Parser::parse(content.as_str())?;
         let current_pass_count = self.pass_count;
@@ -450,15 +484,40 @@ impl Domain {
         self.pass_count = 1;
         ast.iter().try_for_each(|s| s.accept(self))?;
         self.pass_count = current_pass_count;
-        Ok(())
+        if !is_include && self.main_id.is_none() {
+            Err(Error::Domain(filepath.to_owned(), "Main task not found.".to_string()))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn get_main_id(&self) -> usize {
+        // check in compile ensures this never fails.
+        self.main_id.unwrap()
+    }
+
+    pub fn get_state_mapping(&self) -> &HashMap<String, usize> {
+        &self.compiler.state_mapping
+    }
+
+    pub fn get_operator_mapping(&self) -> Vec<&String> {
+        let mut container: Vec<_> = self.compiler.operator_mapping.keys().collect();
+        container.sort_by_key(|a| self.compiler.operator_mapping.get(*a).unwrap());
+        container
+    }
+
+    pub fn get_blackboard_mapping(&self) -> Vec<&String> {
+        let mut container: Vec<_> = self.compiler.blackboard_mapping.keys().collect();
+        container.sort_by_key(|a| self.compiler.blackboard_mapping.get(*a).unwrap());
+        container
     }
        
     pub fn from_file(filepath:&str, type_counts:HashMap<String, usize>) -> Result<Domain, Error> {   
         let mut domain = Domain{filepath:String::from(filepath), type_counts, tasks:Vec::new(), compiler:ExpressionCompiler::new(), methods:Vec::new(), method_ids:HashMap::new(), neighbors:HashMap::new(), pass_count:0, main_id:None};
 
-        match domain.compile(filepath) {
-            Ok(_) => Ok(domain),
-            Err(mut e) => {if !e.has_path() { e.set_path(filepath); } Err(Error::Domain(filepath.to_owned(), Box::new(e)))} 
+        match domain.compile(filepath, false) {
+            Ok(_) => {domain.build_neighbor_map(); Ok(domain)},
+            Err(mut e) => {if !e.has_path() { e.set_path(filepath);} Err(e)} 
         }
     }
 }
