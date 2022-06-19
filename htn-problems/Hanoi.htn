@@ -1,0 +1,57 @@
+# 3 pegs, 3 slots each, each slot is an integer representing plate width
+
+# type Slot:
+#     left_bottom
+#     left_middle
+#     left_top
+#     center_bottom
+#     center_middle
+#     center_top
+#     right_bottom
+#     right_middle
+#     right_top
+
+type Peg:
+    left
+    middle
+    right
+
+task Main(right.bottom == 3 & right.middle == 2 & right.top == 1):
+    complete()
+
+
+task Pikcup_top(carry==0 & peg.top > 0) on Peg as peg:
+    pikcup(peg.top)
+effects:
+    carry = peg.top
+    peg.top = 0
+
+task Dropoff_top(carry>0 & peg.top==0 & peg.middle < carry) on Peg as peg:
+    dropoff(peg.top, carry)
+effects:
+    peg.top = carry
+    carry = 0
+
+task Pikcup_middle(carry==0 & peg.middle > 0 & peg.top == 0) on Peg as peg:
+    pikcup(peg.middle)
+effects:
+    carry = peg.middle
+    peg.middle = 0
+
+task Dropoff_middle(carry>0 & peg.middle==0 & peg.bottom < carry & peg.top == 0) on Peg as peg:
+    dropoff(peg.middle, carry)
+effects:
+    peg.middle = carry
+    carry = 0
+
+task Pikcup_bottom(carry==0 & peg.bottom > 0 & peg.middle == 0 & peg.top == 0) on Peg as peg:
+    pikcup(peg.bottom)
+effects:
+    carry = peg.bottom
+    peg.bottom = 0
+
+task Dropoff_bottom(carry>0 & peg.bottom==0 & peg.middle == 0 & peg.top == 0) on Peg as peg:
+    dropoff(peg.bottom, carry)
+effects:
+    peg.bottom = carry
+    carry = 0

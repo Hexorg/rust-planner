@@ -25,51 +25,51 @@ impl State {
                 Operation::WriteState(idx) => self.0[*idx] = stack.pop().unwrap(),
                 Operation::Push(v) => stack.push(*v),
                 Operation::Equals => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(OperandType::B(left == right))},
                 Operation::Greater => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(OperandType::B(left > right))},
                 Operation::Smaller => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(OperandType::B(left < right))},
                 Operation::GreaterOrEquals => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(OperandType::B(left >= right))},
                 Operation::SmallerOrEquals => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(OperandType::B(left <= right))},
                 Operation::Not => {
                     let left = stack.pop().unwrap();
                     stack.push(!left)},
                 Operation::And => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(left & right)},
                 Operation::Or => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(left | right)},
                 Operation::Subtract => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(left - right)},
                 Operation::Add => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(left + right)},
                 Operation::Multiply => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(left * right)},
                 Operation::Divide => {
-                    let left = stack.pop().unwrap();
                     let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
                     stack.push(left / right)},
                 Operation::ReadBlackboard(_) |
                 Operation::WriteBlackboard(_) |

@@ -10,7 +10,7 @@ use htn::planner::Planner;
 fn main() {
     let type_map = HashMap::<&str, Vec<&str>>::new();
     //type_map.insert("Cell", vec!["cell0", "cell1", "cell2", "cell3", "cell4", "cell5", "cell6"]);
-    let domain = match Domain::from_file("htn-problems/Stacking_typed.htn", type_map) {
+    let domain = match Domain::from_file("htn-problems/Hanoi.htn", type_map) {
         Ok(domain) => domain,
         Err(e) => {eprintln!("{}", e); panic!()},
     };
@@ -22,14 +22,17 @@ fn main() {
     let blackboard = planner.domain.get_blackboard_mapping();
     let mut state = planner.new_state();
     use OperandType::*;
-    state.set(*vid.get("carry").unwrap(), B(false));
-    state.set(*vid.get("cell0").unwrap(), B(true));
-    state.set(*vid.get("cell1").unwrap(), B(true));
-    state.set(*vid.get("cell2").unwrap(), B(false));
-    state.set(*vid.get("cell3").unwrap(), B(false));
-    state.set(*vid.get("cell4").unwrap(), B(false));
-    state.set(*vid.get("cell5").unwrap(), B(false));
-    state.set(*vid.get("cell6").unwrap(), B(false));
+    state.set(*vid.get("carry").unwrap(), I(0));
+    state.set(*vid.get("left.bottom").unwrap(), I(3));
+    state.set(*vid.get("left.middle").unwrap(), I(2));
+    state.set(*vid.get("left.top").unwrap(), I(1));
+    // state.set(*vid.get("cell0").unwrap(), B(true));
+    // state.set(*vid.get("cell1").unwrap(), B(true));
+    // state.set(*vid.get("cell2").unwrap(), B(false));
+    // state.set(*vid.get("cell3").unwrap(), B(false));
+    // state.set(*vid.get("cell4").unwrap(), B(false));
+    // state.set(*vid.get("cell5").unwrap(), B(false));
+    // state.set(*vid.get("cell6").unwrap(), B(false));
 
 
     let plan = planner.plan(&state).unwrap();

@@ -58,7 +58,7 @@ impl Node {
             if current.state.eval(goal).unwrap().is_true() {
                 return Some((reconstruct_path(cameFrom, &current), total_plan_cost.0));
             }
-            let all_tasks = (1..planner.domain.tasks.len()).collect();
+            let all_tasks = (0..planner.domain.tasks.len()).filter(|i| *i != planner.domain.get_main_id()).collect();
             let neighbors = planner.domain.neighbors.get(&current.task_id).unwrap_or(&all_tasks);
             for task_id in neighbors {
                 // println!("Can we run {}? ", task_name);
@@ -88,7 +88,7 @@ impl Node {
             // println!("No more neighbors");
             // println!("There are {} reachable nodes", openSet.len());
         }
-        // println!("ASTAR FAIL");
+        println!("ASTAR FAIL");
         return None;
     }
 // }
