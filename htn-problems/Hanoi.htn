@@ -26,7 +26,7 @@ effects:
     carry = peg.top
     peg.top = 0
 
-task Dropoff_top(carry>0 & peg.top==0 & peg.middle < carry) on Peg as peg:
+task Dropoff_top(carry>0 & peg.top==0 & peg.middle > carry) on Peg as peg:
     dropoff(peg.top, carry)
 effects:
     peg.top = carry
@@ -38,7 +38,7 @@ effects:
     carry = peg.middle
     peg.middle = 0
 
-task Dropoff_middle(carry>0 & peg.middle==0 & peg.bottom < carry & peg.top == 0) on Peg as peg:
+task Dropoff_middle(carry>0 & peg.middle==0 & peg.bottom > carry & peg.top == 0) on Peg as peg:
     dropoff(peg.middle, carry)
 effects:
     peg.middle = carry

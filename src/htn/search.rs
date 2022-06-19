@@ -54,7 +54,7 @@ impl Node {
         // println!("Start state is {:?}", start);
         
         while let Some((mut current, total_plan_cost)) = openSet.pop() {
-            // println!("Looking at state that resulted from calling {}: {:?}. Cost to reach: {}", current.task_name, current.state, total_plan_cost.0);
+            
             if current.state.eval(goal).unwrap().is_true() {
                 return Some((reconstruct_path(cameFrom, &current), total_plan_cost.0));
             }
