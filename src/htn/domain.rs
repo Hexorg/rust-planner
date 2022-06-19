@@ -1,7 +1,6 @@
 use std::collections::HashSet;
-use std::hash::Hash;
 use std::mem;
-use std::{fs, fmt::Debug,  collections::HashMap, rc::Rc, ops::Deref};
+use std::{fs, fmt::Debug,  collections::HashMap};
 
 use super::parser::expression::ExpressionVisitor;
 use super::parser::statement::StatementVisitor;
@@ -82,7 +81,6 @@ pub struct ComplexTask {
     pub cost: i32,
     pub body: Vec<PrimitiveTask>,
     pub effects: Vec<Operation>,
-    task_ids: HashMap<String, usize>,
 }
 
 #[derive(Debug)]
@@ -141,9 +139,7 @@ pub struct Domain {
     compiler: ExpressionCompiler,
     pass_count: usize,
     type_counts:HashMap<String, usize>,
-    methods: Vec<PrimitiveTask>,
-    method_ids: HashMap<String, usize>,
-    
+    methods: Vec<PrimitiveTask>,    
 }
 
 #[derive(Debug)]
@@ -369,8 +365,7 @@ impl ExpressionVisitor<(), Error> for ExpressionCompiler {
 
 
 impl StatementVisitor<(), Error> for Domain {
-    fn visit_method(&mut self, token:&Token, name:&str, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, else_cost:Option<i32>, else_body:Option<&Stmt>) -> Result<(), Error> {
-        self.method_ids.insert(name.to_owned(), self.method_ids.len()).and_then(|_| Some(Err(token.to_err("Duplicate method name.")))).unwrap_or(Ok(()))?;
+    fn visit_method(&mut self, _:&Token, _:&str, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, else_cost:Option<i32>, else_body:Option<&Stmt>) -> Result<(), Error> {
         preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(OperandType::B(true)))))?;
         let preconditions = mem::take(&mut self.compiler.bytecode);
         self.compiler.is_body = true;
@@ -382,7 +377,6 @@ impl StatementVisitor<(), Error> for Domain {
             let mut else_conditions = preconditions.clone();
             self.methods.push(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects});
             else_conditions.push(Operation::Not);
-            self.method_ids.insert("Dont".to_owned() + name, self.method_ids.len()).and_then(|_| Some(Err(token.to_err("Duplicate generated method name. Else methods are automatically named DontMethod.")))).unwrap_or(Ok(()))?;
             else_body.accept(self)?;
             let body = mem::take(&mut self.compiler.bytecode);
             let effects = Vec::new();
@@ -424,7 +418,7 @@ impl StatementVisitor<(), Error> for Domain {
         expr.accept(&mut self.compiler)
     }
 
-    fn visit_include(&mut self, token:&Token, filepath:&str) -> Result<(), Error> {
+    fn visit_include(&mut self, _token:&Token, filepath:&str) -> Result<(), Error> {
         if self.pass_count == 0 {
             match self.compile(filepath, true) {
                 Ok(_) => Ok(()),
@@ -452,8 +446,7 @@ impl Domain {
                 return Err(body.to_err("Can not use methods and operators at the same time in this task.").into())
             }
             let body = mem::take(&mut self.methods);
-            let task_ids = mem::take(&mut self.method_ids);
-            self.tasks.push(Task::Complex(ComplexTask{preconditions, cost:cost.unwrap_or(0), body, effects, task_ids}))
+            self.tasks.push(Task::Complex(ComplexTask{preconditions, cost:cost.unwrap_or(0), body, effects}))
         } else {
             let body = mem::take(&mut self.compiler.bytecode);
             self.tasks.push(Task::Primitive(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects}))
@@ -513,7 +506,7 @@ impl Domain {
     }
        
     pub fn from_file(filepath:&str, type_counts:HashMap<String, usize>) -> Result<Domain, Error> {   
-        let mut domain = Domain{filepath:String::from(filepath), type_counts, tasks:Vec::new(), compiler:ExpressionCompiler::new(), methods:Vec::new(), method_ids:HashMap::new(), neighbors:HashMap::new(), pass_count:0, main_id:None};
+        let mut domain = Domain{filepath:String::from(filepath), type_counts, tasks:Vec::new(), compiler:ExpressionCompiler::new(), methods:Vec::new(), neighbors:HashMap::new(), pass_count:0, main_id:None};
 
         match domain.compile(filepath, false) {
             Ok(_) => {domain.build_neighbor_map(); Ok(domain)},
