@@ -14,7 +14,9 @@ fn main() {
         Ok(domain) => domain,
         Err(e) => {eprintln!("{}", e); panic!()},
     };
+    
     print!("{:?}", domain);
+    // return;
     let planner = Planner::new(domain);
     // todo!();
     let vid = planner.domain.get_state_mapping();
@@ -36,15 +38,25 @@ fn main() {
 
 
     let plan = planner.plan(&state).unwrap();
-    println!("Planer finished successfully. Plan: {:?}", plan);
+    println!("Planer finished successfully. Plan: {:?}\nDecompiled plan:", plan);
+    let mut stack = Vec::new();
     for op in plan.0 {
         match op {
-            htn::domain::Operation::ReadBlackboard(idx) => println!("Reading {}", blackboard[idx]),
-            htn::domain::Operation::WriteBlackboard(idx) => println!("Writing {}", blackboard[idx]),
-            htn::domain::Operation::CallOperator(idx, arity) => println!("Calling {}({})", operators[idx], arity),
+            htn::domain::Operation::ReadBlackboard(idx) => stack.push(blackboard[idx]),
+            htn::domain::Operation::WriteBlackboard(idx) => print!("{} = ", blackboard[idx]),
+            htn::domain::Operation::CallOperator(idx, arity) => println!("{}({})", operators[idx], {
+                let mut i = stack.iter().take(arity);
+                let args = i.by_ref().take(1).fold(String::new(), |acc,item| acc + item);
+                let args = i.fold(args, |acc,item| acc + ", " + item);
+                for _ in 0..arity { stack.pop(); }
+                args
+            }),
             _ => println!("Uxexpected operation: {:?}", op)
         }
     }
     
 
 }
+
+
+// first slide: 

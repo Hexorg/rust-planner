@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::mem;
 use std::{fs, fmt::Debug,  collections::HashMap};
 
+use super::optimization::{self, Wants};
 use super::parser::expression::ExpressionVisitor;
 use super::parser::statement::StatementVisitor;
 use super::parser::{Parser, statement::{Stmt, Binding}, tokens::{self, Token, TokenData}, expression::Expr};
@@ -45,6 +46,20 @@ impl std::hash::Hash for OperandType {
     }
 }
 
+impl std::convert::TryFrom<&Token> for OperandType {
+    type Error = Error;
+
+    fn try_from(value: &Token) -> Result<Self, Self::Error> {
+        match value.t {
+            TokenData::Literal(tokens::Literal::I(i)) => Ok(OperandType::I(i)),
+            TokenData::Literal(tokens::Literal::F(f)) => Ok(OperandType::F(f)),
+            TokenData::Literal(tokens::Literal::B(b)) => Ok(OperandType::B(b)),
+            TokenData::Literal(tokens::Literal::S(_)) => Err(value.to_err("Unexpected string literal.").into()),
+            _ => Err(value.to_err("Unexpected non-literal token.").into()),
+        }
+    }
+}
+
 
 #[derive(Clone, Copy, Debug)]
 pub enum Operation {
@@ -73,7 +88,9 @@ pub struct PrimitiveTask {
     pub preconditions: Vec<Operation>,
     pub cost: i32,
     pub body: Vec<Operation>,
-    pub effects: Vec<Operation>
+    pub effects: Vec<Operation>,
+    wants: HashMap<usize, Wants>,
+    provides: HashMap<usize, Wants>,
 }
 #[derive(Debug)]
 pub struct ComplexTask {
@@ -81,6 +98,8 @@ pub struct ComplexTask {
     pub cost: i32,
     pub body: Vec<PrimitiveTask>,
     pub effects: Vec<Operation>,
+    wants: HashMap<usize, Wants>,
+    provides: HashMap<usize, Wants>,
 }
 
 #[derive(Debug)]
@@ -100,6 +119,20 @@ impl Task {
         let mut result = HashSet::new();
         self.preconditions().iter().for_each(|p| if let Operation::ReadState(idx) = p { result.insert(*idx); });
         result
+    }
+
+    pub fn get_wants(&self) -> &HashMap<usize, Wants> {
+        match self {
+            Self::Complex(ComplexTask{wants,..}) | 
+            Self::Primitive(PrimitiveTask{wants,..}) => wants
+        }
+    }
+
+    pub fn get_provides(&self) -> &HashMap<usize, Wants> {
+        match self {
+            Self::Complex(ComplexTask{provides,..}) | 
+            Self::Primitive(PrimitiveTask{provides,..}) => provides
+        }
     }
 
     pub fn preconditions(&self) -> &Vec<Operation> {
@@ -245,7 +278,8 @@ impl ExpressionCompiler {
             task_mapping:HashMap::new(), 
             type_map:HashMap::new(), 
             binding: None,
-            substitution_id:0}
+            substitution_id:0,
+            }
     }
     #[inline]
     fn get_varpath_state_idx(&mut self, var_path:&[Token]) -> Result<usize, Error> {
@@ -338,12 +372,8 @@ impl ExpressionVisitor<(), Error> for ExpressionCompiler {
     }
 
     fn visit_literal_expr(&mut self, token: &Token, data:&tokens::Literal) -> Result<(), Error> {
-        match data {
-            tokens::Literal::I(i) => Ok(self.bytecode.push(Operation::Push(OperandType::I(*i)))),
-            tokens::Literal::F(f) => Ok(self.bytecode.push(Operation::Push(OperandType::F(*f)))),
-            tokens::Literal::B(b) => Ok(self.bytecode.push(Operation::Push(OperandType::B(*b)))),
-            tokens::Literal::S(_) => Err(token.to_err("Unexpected string literal.").into()),
-        }
+        use std::convert::TryFrom;
+        Ok(self.bytecode.push(Operation::Push(OperandType::try_from(token)?)))
     }
 
     fn visit_variable_expr(&mut self, var_path:&[Token]) -> Result<(), Error> {
@@ -415,6 +445,7 @@ impl StatementVisitor<(), Error> for Domain {
     fn visit_method(&mut self, _:&Token, _:&str, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, else_cost:Option<i32>, else_body:Option<&Stmt>) -> Result<(), Error> {
         preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(OperandType::B(true)))))?;
         let preconditions = mem::take(&mut self.compiler.bytecode);
+        let wants = optimization::build_wants(&preconditions)?;
         self.compiler.is_body = true;
         body.accept(self)?;
         self.compiler.is_body = false;
@@ -422,14 +453,15 @@ impl StatementVisitor<(), Error> for Domain {
         let effects = Vec::new();
         if let Some(else_body) = else_body {
             let mut else_conditions = preconditions.clone();
-            self.methods.push(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects});
+            self.methods.push(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects, wants, provides:HashMap::new()});
             else_conditions.push(Operation::Not);
+            let else_wants = optimization::build_wants(&else_conditions)?;
             else_body.accept(self)?;
             let body = mem::take(&mut self.compiler.bytecode);
             let effects = Vec::new();
-            self.methods.push(PrimitiveTask{preconditions:else_conditions, cost:else_cost.unwrap_or(0), body, effects})
+            self.methods.push(PrimitiveTask{preconditions:else_conditions, cost:else_cost.unwrap_or(0), body, effects, wants:else_wants, provides:HashMap::new()})
         } else {
-            self.methods.push(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects});
+            self.methods.push(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects, wants, provides:HashMap::new()});
         }
         Ok(())
     }
@@ -495,8 +527,10 @@ impl Domain {
     fn build_task(&mut self, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, effects:Option<&Stmt>) -> Result<(), Error> {
         preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(OperandType::B(true)))))?;
         let preconditions = mem::take(&mut self.compiler.bytecode);
+        let wants = optimization::build_wants(&preconditions)?;
         effects.and_then(|stmt| Some(stmt.accept(self))).unwrap_or(Ok(()))?;
         let effects = mem::take(&mut self.compiler.bytecode);
+        let provides = optimization::build_provides(&effects, &wants)?;
         self.compiler.is_body = true;
         body.accept(self)?;
         self.compiler.is_body = false;
@@ -505,26 +539,64 @@ impl Domain {
                 return Err(body.to_err("Can not use methods and operators at the same time in this task.").into())
             }
             let body = mem::take(&mut self.methods);
-            self.tasks.push(Task::Complex(ComplexTask{preconditions, cost:cost.unwrap_or(0), body, effects}))
+            self.tasks.push(Task::Complex(ComplexTask{preconditions, cost:cost.unwrap_or(0), body, effects, wants, provides}))
         } else {
             let body = mem::take(&mut self.compiler.bytecode);
-            self.tasks.push(Task::Primitive(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects}))
+            self.tasks.push(Task::Primitive(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects, wants, provides}))
         }
         Ok(())
     }
-    fn build_neighbor_map(&mut self) {
+    /// Figure out which tasks can follow what, by checking which tasks effect variables
+    /// that exist in other tasks' preconditions
+    fn build_neighbor_map_based_on_variable_intersection(&mut self) {
+        let mut total_links = 0;
         for (i, x) in self.tasks.iter().enumerate() {
             let effects = x.get_state_effects();
             let mut to_vec = Vec::new();
             for (iy, y) in self.tasks.iter().enumerate() {
                 if iy != i {
                     if effects.intersection(&y.get_state_depends()).count() > 0 {
-                        to_vec.push(iy)
+                        to_vec.push(iy);
+                        total_links += 1;
                     }
                 }
             }
             self.neighbors.insert(i, to_vec);
         }
+        println!("Total links: {}", total_links);
+    }
+
+    /// Figure out which tasks can follow what, by checking which tasks effects provide wants
+    /// that other tasks' preconditions want.
+    fn build_neighbor_map_based_on_inertia(&mut self) {
+        let mut total_links = 0;
+        for (i, x) in self.tasks.iter().enumerate() {
+            let x_provides = x.get_provides();
+
+            let mut to_vec = Vec::new();
+            for (iy, y) in self.tasks.iter().enumerate() {
+                if iy != i {
+                    let y_wants = y.get_wants();
+                    let mut should_add = false;
+                    for (xid, provides) in x_provides {
+                        if y_wants.contains_key(xid) {
+                            if y_wants.get(xid).unwrap().satisfies(provides) {
+                                should_add = true
+                            } else {
+                                should_add = false;
+                                break
+                            }
+                        }
+                    }
+                    if should_add {
+                        total_links += 1;
+                        to_vec.push(iy);
+                    }
+                }
+            }
+            self.neighbors.insert(i, to_vec);
+        }
+        println!("Total links: {}", total_links);
     }
 
     fn compile(&mut self, filepath:&str, is_include:bool) -> Result<(), Error> {
@@ -570,10 +642,18 @@ impl Domain {
 
         let mut compiler = ExpressionCompiler::new();
         compiler.type_map = type_map;
-        let mut domain = Domain{filepath:String::from(filepath), tasks:Vec::new(), compiler, methods:Vec::new(), neighbors:HashMap::new(), pass_count:0, main_id:None};
+        let mut domain = Domain{
+            filepath:String::from(filepath), 
+            tasks:Vec::new(), 
+            compiler, 
+            methods:Vec::new(), 
+            neighbors:HashMap::new(), 
+            pass_count:0, 
+            main_id:None,
+        };
 
         match domain.compile(filepath, false) {
-            Ok(_) => {domain.build_neighbor_map(); Ok(domain)},
+            Ok(_) => {domain.build_neighbor_map_based_on_inertia(); Ok(domain)},
             Err(mut e) => {if !e.has_path() { e.set_path(filepath);} Err(e)} 
         }
     }

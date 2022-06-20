@@ -1,8 +1,8 @@
 use std::{collections::HashMap, cmp::Reverse};
-use super::domain::{Operation, OperandType};
+use super::domain::Operation;
 use super::vm::State;
 
-use super::planner::Planner;
+use super::planner::{Planner, Statistics};
 use priority_queue::PriorityQueue;
 
 #[derive(Clone, Debug, Hash, PartialEq, PartialOrd, Eq)]
@@ -35,8 +35,9 @@ impl Node {
     }
 
     /// Outputs a plan UP TO goal, but not including goal
-    pub fn Astar<F>(start:Node, goal:&Vec<Operation>, heuristic: F, planner:&Planner) -> Option<(Vec<usize>, i32)>
+    pub fn Astar<F>(start:Node, goal:&Vec<Operation>, heuristic: F, planner:&Planner, statistics:&mut Statistics) -> Option<(Vec<usize>, i32)>
         where  F: Fn(&Node)->i32 {
+        statistics.calls_to_astar += 1;
         let mut openSet = PriorityQueue::new();
         let mut cameFrom:HashMap<Node, Node> = HashMap::new();
 
@@ -54,7 +55,8 @@ impl Node {
         // println!("Start state is {:?}", start);
         
         while let Some((mut current, total_plan_cost)) = openSet.pop() {
-            
+            statistics.astar_visited_nodes += 1;
+            statistics.calls_to_eval += 1;
             if current.state.eval(goal).unwrap().is_true() {
                 return Some((reconstruct_path(cameFrom, &current), total_plan_cost.0));
             }
@@ -63,9 +65,11 @@ impl Node {
             for task_id in neighbors {
                 // println!("Can we run {}? ", task_name);
                 let (task, cost) = planner.get_task_and_cost(*task_id);
+                statistics.calls_to_eval += 1;
                 if current.state.eval(task.preconditions()).unwrap().is_true() {
                     let tentative_gScore = gScore.get(&current.state).unwrap_or(&i32::MAX).clone() + cost;
                     let mut new_state = current.state.clone();
+                    statistics.calls_to_eval += 1;
                     new_state.eval(task.effects());
                     if !gScore.contains_key(&new_state) || tentative_gScore < gScore[&new_state] {
                         let new_node = Node::new(&new_state, *task_id);
@@ -88,7 +92,6 @@ impl Node {
             // println!("No more neighbors");
             // println!("There are {} reachable nodes", openSet.len());
         }
-        println!("ASTAR FAIL");
         return None;
     }
 // }
