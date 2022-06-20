@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::mem;
 use std::{fs, fmt::Debug,  collections::HashMap};
 
-use super::optimization::{self, Wants};
+use super::optimization::{self, Inertia};
 use super::parser::expression::ExpressionVisitor;
 use super::parser::statement::StatementVisitor;
 use super::parser::{Parser, statement::{Stmt, Binding}, tokens::{self, Token, TokenData}, expression::Expr};
@@ -89,8 +89,8 @@ pub struct PrimitiveTask {
     pub cost: i32,
     pub body: Vec<Operation>,
     pub effects: Vec<Operation>,
-    wants: HashMap<usize, Wants>,
-    provides: HashMap<usize, Wants>,
+    wants: HashMap<usize, Inertia>,
+    provides: HashMap<usize, Inertia>,
 }
 #[derive(Debug)]
 pub struct ComplexTask {
@@ -98,8 +98,8 @@ pub struct ComplexTask {
     pub cost: i32,
     pub body: Vec<PrimitiveTask>,
     pub effects: Vec<Operation>,
-    wants: HashMap<usize, Wants>,
-    provides: HashMap<usize, Wants>,
+    wants: HashMap<usize, Inertia>,
+    provides: HashMap<usize, Inertia>,
 }
 
 #[derive(Debug)]
@@ -121,14 +121,14 @@ impl Task {
         result
     }
 
-    pub fn get_wants(&self) -> &HashMap<usize, Wants> {
+    pub fn get_wants(&self) -> &HashMap<usize, Inertia> {
         match self {
             Self::Complex(ComplexTask{wants,..}) | 
             Self::Primitive(PrimitiveTask{wants,..}) => wants
         }
     }
 
-    pub fn get_provides(&self) -> &HashMap<usize, Wants> {
+    pub fn get_provides(&self) -> &HashMap<usize, Inertia> {
         match self {
             Self::Complex(ComplexTask{provides,..}) | 
             Self::Primitive(PrimitiveTask{provides,..}) => provides
@@ -256,6 +256,8 @@ impl std::fmt::Debug for Domain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Domain({}):", self.filepath)?;
         writeln!(f, "State mapping: {:?}", self.compiler.state_mapping)?;
+        let total_links = self.neighbors.values().fold(0, |acc, item| acc + item.len());
+        writeln!(f, "Total links: {}", total_links)?;
         writeln!(f, "Task neighbors: {:?}", self.neighbors)?;
         writeln!(f, "Tasks:")?;
         for (id, task) in self.tasks.iter().enumerate() {
@@ -549,7 +551,6 @@ impl Domain {
     /// Figure out which tasks can follow what, by checking which tasks effect variables
     /// that exist in other tasks' preconditions
     fn build_neighbor_map_based_on_variable_intersection(&mut self) {
-        let mut total_links = 0;
         for (i, x) in self.tasks.iter().enumerate() {
             let effects = x.get_state_effects();
             let mut to_vec = Vec::new();
@@ -557,19 +558,16 @@ impl Domain {
                 if iy != i {
                     if effects.intersection(&y.get_state_depends()).count() > 0 {
                         to_vec.push(iy);
-                        total_links += 1;
                     }
                 }
             }
             self.neighbors.insert(i, to_vec);
         }
-        println!("Total links: {}", total_links);
     }
 
     /// Figure out which tasks can follow what, by checking which tasks effects provide wants
     /// that other tasks' preconditions want.
     fn build_neighbor_map_based_on_inertia(&mut self) {
-        let mut total_links = 0;
         for (i, x) in self.tasks.iter().enumerate() {
             let x_provides = x.get_provides();
 
@@ -589,14 +587,12 @@ impl Domain {
                         }
                     }
                     if should_add {
-                        total_links += 1;
                         to_vec.push(iy);
                     }
                 }
             }
             self.neighbors.insert(i, to_vec);
         }
-        println!("Total links: {}", total_links);
     }
 
     fn compile(&mut self, filepath:&str, is_include:bool) -> Result<(), Error> {

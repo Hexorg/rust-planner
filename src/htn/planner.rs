@@ -98,21 +98,29 @@ impl Planner {
         Ok(all)
     }
 
+    fn heuristic(&self, node:&Node) {
+
+    }
+
     fn run_astar(&self, plan:&mut Plan, state:&mut State, stats:&mut Statistics, task_id:usize) -> Result<bool, Error> {
         if plan.0.len() > 40 && task_id == self.domain.get_main_id() {
             return Ok(true)
         }
 
-        match self.domain.tasks.get(task_id).unwrap() {
+        let task = self.domain.tasks.get(task_id).unwrap();
+        let mut goal_state = state.clone();
+        goal_state.admit(task.get_wants());
+        let heuristic = |node:&Node| node.state.manhattan_distance(&goal_state);
+        match task {
             Task::Complex(ComplexTask { preconditions, cost, body, effects,.. }) => {
-                if let Some((task_plan, _task_plan_cost)) = Astar(Node::new(state, usize::MAX), preconditions, |f| 4, self, stats) {
+                if let Some((task_plan, _task_plan_cost)) = Astar(Node::new(state, usize::MAX), preconditions, heuristic, self, stats) {
                     for subtask in task_plan {
                         self.run_astar(plan, state, stats, subtask)?;
                     }
 
                     let mut method_plans = PriorityQueue::new();
                     for (method_id, method) in body.iter().enumerate() {
-                        if let Some((mut method_plan, method_plan_cost)) = Astar(Node::new(state, usize::MAX), &method.preconditions, |f| 4, self, stats) {
+                        if let Some((mut method_plan, method_plan_cost)) = Astar(Node::new(state, usize::MAX), &method.preconditions, heuristic, self, stats) {
                             method_plan.push(method_id);
                             method_plans.push(method_plan, Reverse(method_plan_cost+cost));
                         }
@@ -135,7 +143,7 @@ impl Planner {
                 }
             },
             Task::Primitive(PrimitiveTask { preconditions, cost, body, effects,..}) => {
-                if let Some((task_plan, _task_plan_cost)) = Astar(Node::new(state, usize::MAX), preconditions, |f| 4, self, stats) {
+                if let Some((task_plan, _task_plan_cost)) = Astar(Node::new(state, usize::MAX), preconditions, heuristic, self, stats) {
                     for subtask in task_plan {
                         self.run_astar(plan, state, stats, subtask)?;
                     }

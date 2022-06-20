@@ -4,7 +4,7 @@ use super::{parser::{expression::ExpressionVisitor, tokens::{Token, TokenData}},
 use super::domain::{self, OperandType};
 
 #[derive(Debug, Clone, Copy)]
-pub enum Wants {
+pub enum Inertia {
     Item(OperandType),
     // Items(Vec<OperandType>),
     NotItem(OperandType),
@@ -19,53 +19,53 @@ pub enum Wants {
     None // Can't satisfy constraints. preconditions are unreachable.
 }
 
-impl Wants {
-    fn bool_eval(&self, op:&Operation, arg:OperandType) -> Result<Wants, domain::Error> {
+impl Inertia {
+    fn bool_eval(&self, op:&Operation, arg:OperandType) -> Result<Inertia, domain::Error> {
         let inertia = match self {
             Self::Item(OperandType::B(v)) => *v,
             Self::NotItem(OperandType::B(v)) => !*v,
             Self::Any => true,
-            _ => return Ok(Wants::None) // (? == 5) can never result in, e.g. 124
+            _ => return Ok(Inertia::None) // (? == 5) can never result in, e.g. 124
         };
         // println!("bool_eval({:?}, {:?} has {} inertia.", op, arg, inertia);
         use Operation::*;
         Ok(match (inertia, op) {
-            (true, Equals) => Wants::Item(arg),
-            (true, Smaller) => Wants::Smaller(arg),
-            (true, SmallerOrEquals) => Wants::SmallerOrEquals(arg),
-            (true, Greater) => Wants::Greater(arg),
-            (true, GreaterOrEquals) => Wants::GreaterOrEquals(arg),
-            (true, And) => if arg.is_true() { Wants::Any} else {Wants::None},
+            (true, Equals) => Inertia::Item(arg),
+            (true, Smaller) => Inertia::Smaller(arg),
+            (true, SmallerOrEquals) => Inertia::SmallerOrEquals(arg),
+            (true, Greater) => Inertia::Greater(arg),
+            (true, GreaterOrEquals) => Inertia::GreaterOrEquals(arg),
+            (true, And) => if arg.is_true() { Inertia::Any} else {Inertia::None},
 
             
-            (false, Equals) => Wants::NotItem(arg),
-            (false, Smaller) => Wants::GreaterOrEquals(arg),
-            (false, SmallerOrEquals) => Wants::Greater(arg),
-            (false, Greater) => Wants::SmallerOrEquals(arg) ,
-            (false, GreaterOrEquals) => Wants::Smaller(arg),
-            (false, And) => if arg.is_true() { Wants::None} else {Wants::Any},
-            (_, Not) => Wants::Item(OperandType::B(!inertia)),
-            (_, Or) => if arg.is_true() { Wants::Any} else {Wants::Item(OperandType::B(inertia))},
+            (false, Equals) => Inertia::NotItem(arg),
+            (false, Smaller) => Inertia::GreaterOrEquals(arg),
+            (false, SmallerOrEquals) => Inertia::Greater(arg),
+            (false, Greater) => Inertia::SmallerOrEquals(arg) ,
+            (false, GreaterOrEquals) => Inertia::Smaller(arg),
+            (false, And) => if arg.is_true() { Inertia::None} else {Inertia::Any},
+            (_, Not) => Inertia::Item(OperandType::B(!inertia)),
+            (_, Or) => if arg.is_true() { Inertia::Any} else {Inertia::Item(OperandType::B(inertia))},
             _ => todo!("More operations...?")
             // _ => return Err(domain::Error::Domain(String::new(), "Unexpected operation."))
         })
     }
 
-    pub fn inverted(&self) -> Wants {
+    pub fn inverted(&self) -> Inertia {
         match self {
-            Wants::Item(i) => Wants::NotItem(*i),
-            Wants::NotItem(i) => Wants::Item(*i),
-            Wants::Greater(i) => Wants::SmallerOrEquals(*i),
-            Wants::GreaterOrEquals(i) => Wants::Smaller(*i),
-            Wants::Smaller(i) => Wants::GreaterOrEquals(*i),
-            Wants::SmallerOrEquals(i) => Wants::Greater(*i),
-            Wants::Depends(op, var) => match op {
-                Operation::Equals => Wants::Depends(Operation::Not, *var),
-                Operation::Greater => Wants::Depends(Operation::SmallerOrEquals, *var),
-                Operation::Smaller => Wants::Depends(Operation::GreaterOrEquals, *var),
-                Operation::GreaterOrEquals => Wants::Depends(Operation::Smaller, *var),
-                Operation::SmallerOrEquals => Wants::Depends(Operation::Greater, *var),
-                Operation::Not => Wants::Depends(Operation::Equals, *var),
+            Inertia::Item(i) => Inertia::NotItem(*i),
+            Inertia::NotItem(i) => Inertia::Item(*i),
+            Inertia::Greater(i) => Inertia::SmallerOrEquals(*i),
+            Inertia::GreaterOrEquals(i) => Inertia::Smaller(*i),
+            Inertia::Smaller(i) => Inertia::GreaterOrEquals(*i),
+            Inertia::SmallerOrEquals(i) => Inertia::Greater(*i),
+            Inertia::Depends(op, var) => match op {
+                Operation::Equals => Inertia::Depends(Operation::Not, *var),
+                Operation::Greater => Inertia::Depends(Operation::SmallerOrEquals, *var),
+                Operation::Smaller => Inertia::Depends(Operation::GreaterOrEquals, *var),
+                Operation::GreaterOrEquals => Inertia::Depends(Operation::Smaller, *var),
+                Operation::SmallerOrEquals => Inertia::Depends(Operation::Greater, *var),
+                Operation::Not => Inertia::Depends(Operation::Equals, *var),
                 Operation::And => todo!(),
                 Operation::Or => todo!(),
                 Operation::Subtract => todo!(),
@@ -74,209 +74,171 @@ impl Wants {
                 Operation::Divide => todo!(),
                 _ => panic!("Unsupported operation.")
             }
-            Wants::Any => Wants::None,
-            Wants::Some => Wants::Some,
-            Wants::None => Wants::Any,
+            Inertia::Any => Inertia::None,
+            Inertia::Some => Inertia::Some,
+            Inertia::None => Inertia::Any,
         }
     }
 
-    pub fn intersection(&self, other:&Self, arg:OperandType) -> Result<Wants, domain::Error> {
-        // println!("Getting intersection of {:?} and {:?} wants with arg {:?}.", self, other, arg);
+    pub fn intersection(&self, other:&Self, arg:OperandType) -> Result<Inertia, domain::Error> {
+        // println!("Getting intersection of {:?} and {:?} Inertia with arg {:?}.", self, other, arg);
         match (self, other) {
-            (Wants::Item(_), Wants::Item(_)) => todo!(),
-            (Wants::Item(_), Wants::NotItem(_)) => todo!(),
-            (Wants::Item(_), Wants::Greater(_)) => todo!(),
-            (Wants::Item(_), Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::Item(_), Wants::Smaller(_)) => todo!(),
-            (Wants::Item(_), Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::Item(_), Wants::Depends(op, None)) => self.bool_eval(op, arg),
-            (Wants::Item(_), Wants::Any) => todo!(),
-            (Wants::Item(_), Wants::Some) => todo!(),
-            (Wants::Item(_), Wants::None) => todo!(),
-            (Wants::NotItem(_), Wants::Item(_)) => todo!(),
-            (Wants::NotItem(_), Wants::NotItem(_)) => todo!(),
-            (Wants::NotItem(_), Wants::Greater(_)) => todo!(),
-            (Wants::NotItem(_), Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::NotItem(_), Wants::Smaller(_)) => todo!(),
-            (Wants::NotItem(_), Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::NotItem(_), Wants::Depends(_, _)) => todo!(),
-            (Wants::NotItem(_), Wants::Any) => todo!(),
-            (Wants::NotItem(_), Wants::Some) => todo!(),
-            (Wants::NotItem(_), Wants::None) => todo!(),
-            (Wants::Greater(_), Wants::Item(_)) => todo!(),
-            (Wants::Greater(_), Wants::NotItem(_)) => todo!(),
-            (Wants::Greater(_), Wants::Greater(_)) => todo!(),
-            (Wants::Greater(_), Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::Greater(_), Wants::Smaller(_)) => todo!(),
-            (Wants::Greater(_), Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::Greater(_), Wants::Depends(_, _)) => todo!(),
-            (Wants::Greater(_), Wants::Any) => todo!(),
-            (Wants::Greater(_), Wants::Some) => todo!(),
-            (Wants::Greater(_), Wants::None) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::Item(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::NotItem(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::Greater(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::Smaller(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::Depends(_, _)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::Any) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::Some) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::None) => todo!(),
-            (Wants::Smaller(_), Wants::Item(_)) => todo!(),
-            (Wants::Smaller(_), Wants::NotItem(_)) => todo!(),
-            (Wants::Smaller(_), Wants::Greater(_)) => todo!(),
-            (Wants::Smaller(_), Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::Smaller(_), Wants::Smaller(_)) => todo!(),
-            (Wants::Smaller(_), Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::Smaller(_), Wants::Depends(_, _)) => todo!(),
-            (Wants::Smaller(_), Wants::Any) => todo!(),
-            (Wants::Smaller(_), Wants::Some) => todo!(),
-            (Wants::Smaller(_), Wants::None) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Item(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::NotItem(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Greater(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Smaller(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Depends(_, _)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Any) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Some) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::None) => todo!(),
-            (Wants::Depends(_, _), Wants::Item(_)) => todo!(),
-            (Wants::Depends(_, _), Wants::NotItem(_)) => todo!(),
-            (Wants::Depends(_, _), Wants::Greater(_)) => todo!(),
-            (Wants::Depends(_, _), Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::Depends(_, _), Wants::Smaller(_)) => todo!(),
-            (Wants::Depends(_, _), Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::Depends(_, _), Wants::Depends(_, _)) => todo!(),
-            (Wants::Depends(_, _), Wants::Any) => todo!(),
-            (Wants::Depends(_, _), Wants::Some) => todo!(),
-            (Wants::Depends(_, _), Wants::None) => todo!(),
-            (Wants::Any, Wants::Item(_)) => todo!(),
-            (Wants::Any, Wants::NotItem(_)) => todo!(),
-            (Wants::Any, Wants::Greater(_)) => todo!(),
-            (Wants::Any, Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::Any, Wants::Smaller(_)) => todo!(),
-            (Wants::Any, Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::Any, Wants::Depends(_, _)) => todo!(),
-            (Wants::Any, Wants::Any) => todo!(),
-            (Wants::Any, Wants::Some) => todo!(),
-            (Wants::Any, Wants::None) => todo!(),
-            (Wants::Some, Wants::Item(_)) => todo!(),
-            (Wants::Some, Wants::NotItem(_)) => todo!(),
-            (Wants::Some, Wants::Greater(_)) => todo!(),
-            (Wants::Some, Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::Some, Wants::Smaller(_)) => todo!(),
-            (Wants::Some, Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::Some, Wants::Depends(_, _)) => todo!(),
-            (Wants::Some, Wants::Any) => todo!(),
-            (Wants::Some, Wants::Some) => todo!(),
-            (Wants::Some, Wants::None) => todo!(),
-            (Wants::None, Wants::Item(_)) => todo!(),
-            (Wants::None, Wants::NotItem(_)) => todo!(),
-            (Wants::None, Wants::Greater(_)) => todo!(),
-            (Wants::None, Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::None, Wants::Smaller(_)) => todo!(),
-            (Wants::None, Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::None, Wants::Depends(_, _)) => todo!(),
-            (Wants::None, Wants::Any) => todo!(),
-            (Wants::None, Wants::Some) => todo!(),
-            (Wants::None, Wants::None) => todo!(),
+            (Inertia::Item(_), Inertia::Item(_)) => todo!(),
+            (Inertia::Item(_), Inertia::NotItem(_)) => todo!(),
+            (Inertia::Item(_), Inertia::Greater(_)) => todo!(),
+            (Inertia::Item(_), Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::Item(_), Inertia::Smaller(_)) => todo!(),
+            (Inertia::Item(_), Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::Item(_), Inertia::Depends(op, None)) => self.bool_eval(op, arg),
+            (Inertia::Item(_), Inertia::Any) => todo!(),
+            (Inertia::Item(_), Inertia::Some) => todo!(),
+            (Inertia::Item(_), Inertia::None) => todo!(),
+            (Inertia::NotItem(_), Inertia::Item(_)) => todo!(),
+            (Inertia::NotItem(_), Inertia::NotItem(_)) => todo!(),
+            (Inertia::NotItem(_), Inertia::Greater(_)) => todo!(),
+            (Inertia::NotItem(_), Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::NotItem(_), Inertia::Smaller(_)) => todo!(),
+            (Inertia::NotItem(_), Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::NotItem(_), Inertia::Depends(_, _)) => todo!(),
+            (Inertia::NotItem(_), Inertia::Any) => todo!(),
+            (Inertia::NotItem(_), Inertia::Some) => todo!(),
+            (Inertia::NotItem(_), Inertia::None) => todo!(),
+            (Inertia::Greater(_), Inertia::Item(_)) => todo!(),
+            (Inertia::Greater(_), Inertia::NotItem(_)) => todo!(),
+            (Inertia::Greater(_), Inertia::Greater(_)) => todo!(),
+            (Inertia::Greater(_), Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::Greater(_), Inertia::Smaller(_)) => todo!(),
+            (Inertia::Greater(_), Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::Greater(_), Inertia::Depends(_, _)) => todo!(),
+            (Inertia::Greater(_), Inertia::Any) => todo!(),
+            (Inertia::Greater(_), Inertia::Some) => todo!(),
+            (Inertia::Greater(_), Inertia::None) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::Item(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::NotItem(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::Greater(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::Smaller(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::Depends(_, _)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::Any) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::Some) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::None) => todo!(),
+            (Inertia::Smaller(_), Inertia::Item(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::NotItem(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::Greater(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::Smaller(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::Depends(_, _)) => todo!(),
+            (Inertia::Smaller(_), Inertia::Any) => todo!(),
+            (Inertia::Smaller(_), Inertia::Some) => todo!(),
+            (Inertia::Smaller(_), Inertia::None) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::Item(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::NotItem(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::Greater(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::Smaller(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::Depends(_, _)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::Any) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::Some) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::None) => todo!(),
+            (Inertia::Depends(_, _), Inertia::Item(_)) => todo!(),
+            (Inertia::Depends(_, _), Inertia::NotItem(_)) => todo!(),
+            (Inertia::Depends(_, _), Inertia::Greater(_)) => todo!(),
+            (Inertia::Depends(_, _), Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::Depends(_, _), Inertia::Smaller(_)) => todo!(),
+            (Inertia::Depends(_, _), Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::Depends(_, _), Inertia::Depends(_, _)) => todo!(),
+            (Inertia::Depends(_, _), Inertia::Any) => todo!(),
+            (Inertia::Depends(_, _), Inertia::Some) => todo!(),
+            (Inertia::Depends(_, _), Inertia::None) => todo!(),
+            (Inertia::Any, Inertia::Item(_)) => todo!(),
+            (Inertia::Any, Inertia::NotItem(_)) => todo!(),
+            (Inertia::Any, Inertia::Greater(_)) => todo!(),
+            (Inertia::Any, Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::Any, Inertia::Smaller(_)) => todo!(),
+            (Inertia::Any, Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::Any, Inertia::Depends(_, _)) => todo!(),
+            (Inertia::Any, Inertia::Any) => todo!(),
+            (Inertia::Any, Inertia::Some) => todo!(),
+            (Inertia::Any, Inertia::None) => todo!(),
+            (Inertia::Some, Inertia::Item(_)) => todo!(),
+            (Inertia::Some, Inertia::NotItem(_)) => todo!(),
+            (Inertia::Some, Inertia::Greater(_)) => todo!(),
+            (Inertia::Some, Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::Some, Inertia::Smaller(_)) => todo!(),
+            (Inertia::Some, Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::Some, Inertia::Depends(_, _)) => todo!(),
+            (Inertia::Some, Inertia::Any) => todo!(),
+            (Inertia::Some, Inertia::Some) => todo!(),
+            (Inertia::Some, Inertia::None) => todo!(),
+            (Inertia::None, Inertia::Item(_)) => todo!(),
+            (Inertia::None, Inertia::NotItem(_)) => todo!(),
+            (Inertia::None, Inertia::Greater(_)) => todo!(),
+            (Inertia::None, Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::None, Inertia::Smaller(_)) => todo!(),
+            (Inertia::None, Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::None, Inertia::Depends(_, _)) => todo!(),
+            (Inertia::None, Inertia::Any) => todo!(),
+            (Inertia::None, Inertia::Some) => todo!(),
+            (Inertia::None, Inertia::None) => todo!(),
             _ => Err(domain::Error::Domain(String::new(), format!("Unexpected want combination: {:?} and {:?}.", self, other))),
         }
     }
-    pub fn satisfies(&self, provides:&Wants) -> bool {
+    pub fn satisfies(&self, provides:&Inertia) -> bool {
         match (self, provides) {
-            (Wants::Item(want), Wants::Item(have)) => want == have,
-            (Wants::Item(want), Wants::NotItem(have)) => want != have,
-            (Wants::Item(want), Wants::Greater(have)) => want > have,
-            (Wants::Item(want), Wants::GreaterOrEquals(have)) => want >= have,
-            (Wants::Item(want), Wants::Smaller(have)) => want < have,
-            (Wants::Item(want), Wants::SmallerOrEquals(have)) => want <= have,
-            (_, Wants::Depends(_, _)) => true,
-            (Wants::Item(want), Wants::Any) => todo!(),
-            (Wants::Item(want), Wants::Some) => true,
-            (Wants::Item(want), Wants::None) => false,
-            (Wants::NotItem(want), Wants::Item(have)) => todo!(),
-            (Wants::NotItem(want), Wants::NotItem(have)) => todo!(),
-            (Wants::NotItem(want), Wants::Greater(have)) => todo!(),
-            (Wants::NotItem(want), Wants::GreaterOrEquals(have)) => todo!(),
-            (Wants::NotItem(want), Wants::Smaller(have)) => todo!(),
-            (Wants::NotItem(want), Wants::SmallerOrEquals(have)) => todo!(),
-            (Wants::NotItem(want), Wants::Any) => todo!(),
-            (Wants::NotItem(want), Wants::Some) => todo!(),
-            (Wants::NotItem(want), Wants::None) => todo!(),
-            (Wants::Greater(want), Wants::Item(have)) => have > want,
-            (Wants::Greater(want), Wants::NotItem(have)) => true,
-            (Wants::Greater(want), Wants::Greater(have)) => true,
-            (Wants::Greater(want), Wants::GreaterOrEquals(have)) => true,
-            (Wants::Greater(want), Wants::Smaller(have)) => have < want,
-            (Wants::Greater(want), Wants::SmallerOrEquals(have)) => have <= want,
-            (Wants::Greater(want), Wants::Any) => true,
-            (Wants::Greater(want), Wants::Some) => true,
-            (Wants::Greater(want), Wants::None) => false,
-            (Wants::GreaterOrEquals(_), Wants::Item(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::NotItem(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::Greater(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::Smaller(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::Any) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::Some) => todo!(),
-            (Wants::GreaterOrEquals(_), Wants::None) => todo!(),
-            (Wants::Smaller(_), Wants::Item(_)) => todo!(),
-            (Wants::Smaller(_), Wants::NotItem(_)) => todo!(),
-            (Wants::Smaller(_), Wants::Greater(_)) => todo!(),
-            (Wants::Smaller(_), Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::Smaller(_), Wants::Smaller(_)) => todo!(),
-            (Wants::Smaller(_), Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::Smaller(_), Wants::Any) => todo!(),
-            (Wants::Smaller(_), Wants::Some) => todo!(),
-            (Wants::Smaller(_), Wants::None) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Item(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::NotItem(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Greater(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Smaller(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Any) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::Some) => todo!(),
-            (Wants::SmallerOrEquals(_), Wants::None) => todo!(),
-            (Wants::Depends(_, _), _) => true,
-            (Wants::Any, Wants::Item(_)) => todo!(),
-            (Wants::Any, Wants::NotItem(_)) => todo!(),
-            (Wants::Any, Wants::Greater(_)) => todo!(),
-            (Wants::Any, Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::Any, Wants::Smaller(_)) => todo!(),
-            (Wants::Any, Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::Any, Wants::Any) => todo!(),
-            (Wants::Any, Wants::Some) => todo!(),
-            (Wants::Any, Wants::None) => todo!(),
-            (Wants::Some, Wants::Item(_)) => todo!(),
-            (Wants::Some, Wants::NotItem(_)) => todo!(),
-            (Wants::Some, Wants::Greater(_)) => todo!(),
-            (Wants::Some, Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::Some, Wants::Smaller(_)) => todo!(),
-            (Wants::Some, Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::Some, Wants::Any) => todo!(),
-            (Wants::Some, Wants::Some) => todo!(),
-            (Wants::Some, Wants::None) => todo!(),
-            (Wants::None, Wants::Item(_)) => todo!(),
-            (Wants::None, Wants::NotItem(_)) => todo!(),
-            (Wants::None, Wants::Greater(_)) => todo!(),
-            (Wants::None, Wants::GreaterOrEquals(_)) => todo!(),
-            (Wants::None, Wants::Smaller(_)) => todo!(),
-            (Wants::None, Wants::SmallerOrEquals(_)) => todo!(),
-            (Wants::None, Wants::Any) => todo!(),
-            (Wants::None, Wants::Some) => todo!(),
-            (Wants::None, Wants::None) => todo!(),
+            (Inertia::Item(want), Inertia::Item(have)) => want == have,
+            (Inertia::Item(want), Inertia::NotItem(have)) => want != have,
+            (Inertia::Item(want), Inertia::Greater(have)) => want > have,
+            (Inertia::Item(want), Inertia::GreaterOrEquals(have)) => want >= have,
+            (Inertia::Item(want), Inertia::Smaller(have)) => want < have,
+            (Inertia::Item(want), Inertia::SmallerOrEquals(have)) => want <= have,
+            (_, Inertia::Depends(_, _)) => true,
+            (_, Inertia::Any) => true,
+            (_, Inertia::Some) => true,
+            (_, Inertia::None) => false,
+            (Inertia::NotItem(want), Inertia::Item(have)) => todo!(),
+            (Inertia::NotItem(want), Inertia::NotItem(have)) => todo!(),
+            (Inertia::NotItem(want), Inertia::Greater(have)) => todo!(),
+            (Inertia::NotItem(want), Inertia::GreaterOrEquals(have)) => todo!(),
+            (Inertia::NotItem(want), Inertia::Smaller(have)) => todo!(),
+            (Inertia::NotItem(want), Inertia::SmallerOrEquals(have)) => todo!(),
+            (Inertia::Greater(want), Inertia::Item(have)) => have > want,
+            (Inertia::Greater(want), Inertia::NotItem(have)) => true,
+            (Inertia::Greater(want), Inertia::Greater(have)) => true,
+            (Inertia::Greater(want), Inertia::GreaterOrEquals(have)) => true,
+            (Inertia::Greater(want), Inertia::Smaller(have)) => have < want,
+            (Inertia::Greater(want), Inertia::SmallerOrEquals(have)) => have <= want,
+            (Inertia::GreaterOrEquals(_), Inertia::Item(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::NotItem(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::Greater(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::Smaller(_)) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::Item(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::NotItem(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::Greater(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::Smaller(_)) => todo!(),
+            (Inertia::Smaller(_), Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::Item(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::NotItem(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::Greater(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::Smaller(_)) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::Depends(_, _), _) => true,
+            (Inertia::Any, _) => true,
+            (Inertia::Some, _) => true,
+            (Inertia::None, _) => false,
+
         }
     }
 }
 
-pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Wants>) -> Result<HashMap<usize, Wants>, domain::Error> {
-    let mut effects_map = HashMap::new(); //wants.clone();
+pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Inertia>) -> Result<HashMap<usize, Inertia>, domain::Error> {
+    let mut effects_map = HashMap::new(); //Inertia.clone();
     let mut stack = Vec::new();
     for op in effects {
         match op {
@@ -284,14 +246,14 @@ pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Wants>) -> 
                 if wants.contains_key(idx) {
                     stack.push(*wants.get(idx).unwrap())
                 } else {
-                    stack.push(Wants::Depends(Operation::Equals, Some(*idx)))
+                    stack.push(Inertia::Depends(Operation::Equals, Some(*idx)))
                 }
             },
             Operation::WriteState(idx) => {
                 let want = stack.pop().unwrap();
                 effects_map.insert(*idx, want);
             },
-            Operation::Push(literal) => stack.push(Wants::Item(*literal)),
+            Operation::Push(literal) => stack.push(Inertia::Item(*literal)),
             Operation::Equals => todo!(),
             Operation::Greater => todo!(),
             Operation::Smaller => todo!(),
@@ -313,38 +275,38 @@ pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Wants>) -> 
     Ok(effects_map)
 }
 
-pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Wants>, domain::Error> {
+pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inertia>, domain::Error> {
     let mut wants_map = HashMap::new();
-    // println!("Building wants on {:?}", preconditions);
-    let mut wants = vec![Wants::Item(OperandType::B(true))];
+    // println!("Building Inertia on {:?}", preconditions);
+    let mut Inertia = vec![Inertia::Item(OperandType::B(true))];
     use Operation::*;
     for op in preconditions.iter().rev() {
         // print!("{:?} ", op);
         match op {
             And => (),
-            Equals | Greater => wants.push(Wants::Depends(*op, None)),
+            Equals | Greater => Inertia.push(Inertia::Depends(*op, None)),
             Push(literal) => { 
-                let last_want = wants.pop().unwrap();
-                let new_want = if let Some(want) = wants.last() {
+                let last_want = Inertia.pop().unwrap();
+                let new_want = if let Some(want) = Inertia.last() {
                     want.intersection(&last_want, *literal)?
                 } else {
                     todo!("This was the last want...")
                 };
-                wants.push(new_want);
+                Inertia.push(new_want);
             },
             ReadState(idx) => {
-                let want = wants.pop().unwrap();
-                if let Wants::Depends(op, want_idx) = want {
+                let want = Inertia.pop().unwrap();
+                if let Inertia::Depends(op, want_idx) = want {
                     if want_idx.is_none() {
-                        wants.push(Wants::Depends(op, Some(*idx)));
+                        Inertia.push(Inertia::Depends(op, Some(*idx)));
                     } else {
-                        let inv = Wants::Depends(op, Some(*idx)).inverted();
-                        // println!("Setting var#{} wants to {:?}", want_idx.unwrap(), inv);
+                        let inv = Inertia::Depends(op, Some(*idx)).inverted();
+                        // println!("Setting var#{} Inertia to {:?}", want_idx.unwrap(), inv);
                         wants_map.insert(want_idx.unwrap(), inv);
                     }
                 }
-                // println!("Setting var#{} wants to {:?}", idx, want);
-                // println!("Want stack: {:?}", wants);
+                // println!("Setting var#{} Inertia to {:?}", idx, want);
+                // println!("Want stack: {:?}", Inertia);
                 wants_map.insert(*idx, want);
             }
             // Greater => {
@@ -380,13 +342,13 @@ pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Wants
 // }
 // Inertia optimization: {
 //     0: [], 
-//     1: wants: {3: Item(I(0)), 4: Greater(I(0))}, provides: {3: Greater(I(0)), 4: Item(I(0))}
+//     1: Inertia: {3: Item(I(0)), 4: Greater(I(0))}, provides: {3: Greater(I(0)), 4: Item(I(0))}
 //     1: [4, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18], 
 //     2: [5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18], 
 //     3: [6, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], 
-//     4: wants: {4: Item(I(0)), 3: Item(I(0)), 6: Greater(I(0))}, provides: {3: Greater(I(0)), 6: Item(I(0))}
+//     4: Inertia: {4: Item(I(0)), 3: Item(I(0)), 6: Greater(I(0))}, provides: {3: Greater(I(0)), 6: Item(I(0))}
 //     4: [7, 10, 11, 12, 13, 14, 15, 16, 17, 18], 
-//     5: wants: {7: Greater(I(0)), 5: Item(I(0)), 3: Item(I(0))}, provides: {3: Greater(I(0)), 7: Item(I(0))}
+//     5: Inertia: {7: Greater(I(0)), 5: Item(I(0)), 3: Item(I(0))}, provides: {3: Greater(I(0)), 7: Item(I(0))}
 //     5: [8, 10, 11, 12, 13, 14, 15, 16, 17, 18], 
 //     6: [9, 10, 11, 12, 13, 14, 15, 16, 17, 18], 
 //     7: [10, 11, 12, 13, 14, 15, 16, 17, 18], 

@@ -1,5 +1,7 @@
 
-use super::domain::{Operation, OperandType};
+use std::collections::HashMap;
+
+use super::{domain::{Operation, OperandType}, optimization::Inertia};
 
 #[derive(Clone, Debug, std::hash::Hash, std::cmp::PartialEq, std::cmp::PartialOrd, std::cmp::Eq)]
 pub struct State(Vec<OperandType>);
@@ -78,6 +80,76 @@ impl State {
             }
         }
         stack.pop()
+    }
+
+    pub fn admit(&mut self, wants:&HashMap<usize, Inertia>) {
+        for (k, v) in wants {
+            match v {
+                Inertia::Item(lit) |
+                Inertia::GreaterOrEquals(lit) |
+                Inertia::SmallerOrEquals(lit) => self.set(*k, *lit),
+                Inertia::NotItem(lit) => match lit {
+                    OperandType::I(i) => self.set(*k, OperandType::I(i+1)),
+                    OperandType::F(f) => self.set(*k, OperandType::F(f+1.0)),
+                    OperandType::B(b) => self.set(*k, OperandType::B(!b)),
+                },
+                Inertia::Greater(lit) => match lit {
+                    OperandType::I(i) => self.set(*k, OperandType::I(i+1)),
+                    OperandType::F(f) => self.set(*k, OperandType::F(f+1.0)),
+                    OperandType::B(_) => self.set(*k, OperandType::B(true)),
+                },
+                Inertia::Smaller(lit) => match lit {
+                    OperandType::I(i) => self.set(*k, OperandType::I(i-1)),
+                    OperandType::F(f) => self.set(*k, OperandType::F(f-1.0)),
+                    OperandType::B(_) => self.set(*k, OperandType::B(false)),
+                }
+                Inertia::Depends(op, idx) => match op {
+                    Operation::Equals => self.set(*k, self.get(idx.unwrap())),
+                    Operation::Greater => self.set(*k, match self.get(idx.unwrap()) {
+                        OperandType::I(i) => OperandType::I(i+1),
+                        OperandType::F(f) => OperandType::F(f+1.0),
+                        OperandType::B(_) => OperandType::B(true),
+                    }),
+                    Operation::Smaller => self.set(*k, match self.get(idx.unwrap()) {
+                        OperandType::I(i) => OperandType::I(i-1),
+                        OperandType::F(f) => OperandType::F(f-1.0),
+                        OperandType::B(_) => OperandType::B(false),
+                    }),
+                    Operation::GreaterOrEquals => self.set(*k, self.get(idx.unwrap())),
+                    Operation::SmallerOrEquals => self.set(*k, self.get(idx.unwrap())),
+                    Operation::Not => self.set(*k, !self.get(idx.unwrap())),
+                    Operation::And => todo!(),
+                    Operation::Or => todo!(),
+                    Operation::Subtract => todo!(),
+                    Operation::Add => todo!(),
+                    Operation::Multiply => todo!(),
+                    Operation::Divide => todo!(),
+                    _ => (),
+                },
+                Inertia::Any => (),
+                Inertia::Some => (),
+                Inertia::None => (),
+            }
+        }
+    }
+
+    pub fn manhattan_distance(&self, other:&State) -> i32 {
+        let mut distance = 0;
+        for i in 0..self.0.len() {
+            distance += match (self.get(i), other.get(i)) {
+                (OperandType::I(l), OperandType::I(r)) => (l-r).abs(),
+                (OperandType::I(i), OperandType::F(f)) |
+                (OperandType::F(f), OperandType::I(i)) => 10*(i - f.floor() as i32).abs(),
+                (OperandType::I(i), OperandType::B(b)) |
+                (OperandType::B(b), OperandType::I(i))=> (i - if b { 1 } else { 0 }).abs(),
+
+                (OperandType::F(l), OperandType::F(r)) => (l - r).abs().floor() as i32,
+                (OperandType::F(_), OperandType::B(_)) |
+                (OperandType::B(_), OperandType::F(_)) => i32::MAX,
+                (OperandType::B(l), OperandType::B(r)) => if l ^ r { 1 } else { 0 },
+            }
+        }
+        distance
     }
 }
 
