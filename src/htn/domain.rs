@@ -19,6 +19,34 @@ impl std::cmp::Eq for OperandType {
 
 }
 
+pub enum NeighborDetectionAlgorithm {
+    Inertia,
+    VariableSetIntersection,
+    FullyLinked,
+}
+
+pub enum HeuristicAlgorithm {
+    ManhattanDistance,
+    None
+}
+
+pub struct DomainConfig {
+    pub neighbor_detection:NeighborDetectionAlgorithm,
+    pub heuristic_algorithm: HeuristicAlgorithm,
+}
+
+impl DomainConfig {
+    pub fn new() -> Self {
+        Self{neighbor_detection:NeighborDetectionAlgorithm::FullyLinked, heuristic_algorithm:HeuristicAlgorithm::None}
+    }
+    pub fn optimize_max(&mut self) {
+        self.neighbor_detection = NeighborDetectionAlgorithm::Inertia;
+        self.heuristic_algorithm = HeuristicAlgorithm::ManhattanDistance;
+    }
+
+
+}
+
 impl OperandType {
     #[inline]
     pub fn is_true(&self) -> bool {
@@ -170,6 +198,7 @@ pub struct Domain {
     pub tasks: Vec<Task>,
     // pub variable_ids: HashMap<String, usize>,
     pub neighbors: HashMap<usize, Vec<usize>>,
+    pub config: DomainConfig,
     main_id: Option<usize>,
     compiler: ExpressionCompiler,
     pass_count: usize,
@@ -548,6 +577,12 @@ impl Domain {
         }
         Ok(())
     }
+    fn build_neightbor_map_fully_linked(&mut self) {
+        for i in 0..self.tasks.len() {
+            self.neighbors.insert(i, (0..self.tasks.len()).collect());
+        }
+    }
+
     /// Figure out which tasks can follow what, by checking which tasks effect variables
     /// that exist in other tasks' preconditions
     fn build_neighbor_map_based_on_variable_intersection(&mut self) {
@@ -642,14 +677,24 @@ impl Domain {
             filepath:String::from(filepath), 
             tasks:Vec::new(), 
             compiler, 
+            config: DomainConfig::new(),
             methods:Vec::new(), 
             neighbors:HashMap::new(), 
             pass_count:0, 
             main_id:None,
         };
 
+
         match domain.compile(filepath, false) {
-            Ok(_) => {domain.build_neighbor_map_based_on_inertia(); Ok(domain)},
+            Ok(_) => {
+                domain.config.optimize_max();
+                match domain.config.neighbor_detection {
+                    NeighborDetectionAlgorithm::Inertia => domain.build_neighbor_map_based_on_inertia(),
+                    NeighborDetectionAlgorithm::VariableSetIntersection => domain.build_neighbor_map_based_on_variable_intersection(),
+                    NeighborDetectionAlgorithm::FullyLinked => domain.build_neightbor_map_fully_linked()
+                }
+                Ok(domain)
+            },
             Err(mut e) => {if !e.has_path() { e.set_path(filepath);} Err(e)} 
         }
     }

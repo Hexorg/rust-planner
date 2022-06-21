@@ -3,7 +3,7 @@ use std::{fmt, collections::HashMap, rc::Rc, cmp::Reverse, ops::Deref};
 
 
 use priority_queue::PriorityQueue;
-use super::{domain::{Domain, Operation, Task, ComplexTask, PrimitiveTask}, search::{Node, Astar}, vm::State};
+use super::{domain::{Domain, Operation, Task, ComplexTask, PrimitiveTask, HeuristicAlgorithm}, search::{Node, Astar}, vm::State};
 
 #[derive(Debug)]
 pub struct Error(String);
@@ -98,9 +98,6 @@ impl Planner {
         Ok(all)
     }
 
-    fn heuristic(&self, node:&Node) {
-
-    }
 
     fn run_astar(&self, plan:&mut Plan, state:&mut State, stats:&mut Statistics, task_id:usize) -> Result<bool, Error> {
         if plan.0.len() > 40 && task_id == self.domain.get_main_id() {
@@ -110,7 +107,10 @@ impl Planner {
         let task = self.domain.tasks.get(task_id).unwrap();
         let mut goal_state = state.clone();
         goal_state.admit(task.get_wants());
-        let heuristic = |node:&Node| node.state.manhattan_distance(&goal_state);
+        let heuristic = |node:&Node| match self.domain.config.heuristic_algorithm {
+            HeuristicAlgorithm::ManhattanDistance => node.state.manhattan_distance(&goal_state),
+            HeuristicAlgorithm::None => 4,
+        };
         match task {
             Task::Complex(ComplexTask { preconditions, cost, body, effects,.. }) => {
                 if let Some((task_plan, _task_plan_cost)) = Astar(Node::new(state, usize::MAX), preconditions, heuristic, self, stats) {
