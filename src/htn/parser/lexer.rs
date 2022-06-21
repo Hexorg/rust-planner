@@ -51,7 +51,11 @@ impl Lexer {
                     '|' => r.push(Token{line, col, len:1, t:Or}),
                     '&' => r.push(Token{line, col, len:1, t:And}),
                     ',' => r.push(Token{line, col, len:1, t:Comma}),
-                    '.' => r.push(Token{line, col, len:1, t:Dot}),
+                    '.' => if let Some(Token{t:Label(label), ..}) = r.last_mut() { 
+                        if let Err(_) = label.parse::<i32>() { r.push(Token{line, col, len:1, t:Dot})} else {
+                            label.push(c);
+                        }
+                    },
                     '"' => string_data = Some(String::new()),
                     '\n' => { 
                         is_comment = false; 

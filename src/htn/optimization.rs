@@ -262,7 +262,25 @@ pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Inertia>) -
             Operation::Not => todo!(),
             Operation::And => todo!(),
             Operation::Or => todo!(),
-            Operation::Subtract => todo!(),
+            Operation::Subtract => {
+                if let Inertia::Item(subtracting) = stack.pop().unwrap() {
+                let from = stack.pop().unwrap();
+                    match from {
+                        Inertia::Item(val) => stack.push(Inertia::Item(val-subtracting)),
+                        Inertia::NotItem(val) => stack.push(Inertia::NotItem(val-subtracting)),
+                        Inertia::Greater(val) => stack.push(Inertia::Greater(val-subtracting)),
+                        Inertia::GreaterOrEquals(val) => stack.push(Inertia::GreaterOrEquals(val-subtracting)),
+                        Inertia::Smaller(val) => stack.push(Inertia::Smaller(val-subtracting)),
+                        Inertia::SmallerOrEquals(val) => stack.push(Inertia::SmallerOrEquals(val-subtracting)),
+                        Inertia::Depends(_, _) => todo!(),
+                        Inertia::Any => todo!(),
+                        Inertia::Some => todo!(),
+                        Inertia::None => todo!(),
+                    }
+                } else {
+                    todo!("Reason about subtracting variable from something.")
+                }
+            },
             Operation::Add => todo!(),
             Operation::Multiply => todo!(),
             Operation::Divide => todo!(),
@@ -278,27 +296,29 @@ pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Inertia>) -
 pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inertia>, domain::Error> {
     let mut wants_map = HashMap::new();
     // println!("Building Inertia on {:?}", preconditions);
-    let mut Inertia = vec![Inertia::Item(OperandType::B(true))];
+    let mut inertias = vec![Inertia::Item(OperandType::B(true))];
     use Operation::*;
     for op in preconditions.iter().rev() {
-        // print!("{:?} ", op);
+        // println!("{:?} in {:?}", op, preconditions);
         match op {
             And => (),
-            Equals | Greater => Inertia.push(Inertia::Depends(*op, None)),
+            Equals | Greater => inertias.push(Inertia::Depends(*op, None)),
             Push(literal) => { 
-                let last_want = Inertia.pop().unwrap();
-                let new_want = if let Some(want) = Inertia.last() {
+                //if 
+                let last_want = inertias.pop().unwrap();
+                let new_want = if let Some(want) = inertias.last() {
                     want.intersection(&last_want, *literal)?
                 } else {
-                    todo!("This was the last want...")
+                    last_want
+                    // todo!("This was the last want...")
                 };
-                Inertia.push(new_want);
+                inertias.push(new_want);
             },
             ReadState(idx) => {
-                let want = Inertia.pop().unwrap();
+                let want = inertias.pop().unwrap();
                 if let Inertia::Depends(op, want_idx) = want {
                     if want_idx.is_none() {
-                        Inertia.push(Inertia::Depends(op, Some(*idx)));
+                        inertias.push(Inertia::Depends(op, Some(*idx)));
                     } else {
                         let inv = Inertia::Depends(op, Some(*idx)).inverted();
                         // println!("Setting var#{} Inertia to {:?}", want_idx.unwrap(), inv);

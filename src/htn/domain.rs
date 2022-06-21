@@ -473,7 +473,9 @@ impl ExpressionVisitor<(), Error> for ExpressionCompiler {
 
 
 impl StatementVisitor<(), Error> for Domain {
-    fn visit_method(&mut self, _:&Token, _:&str, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, else_cost:Option<i32>, else_body:Option<&Stmt>) -> Result<(), Error> {
+    fn visit_method(&mut self, _:&Token, name:&str, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, else_cost:Option<i32>, else_body:Option<&Stmt>) -> Result<(), Error> {
+        // println!("Building method {} is_body = {}", name, self.compiler.is_body);
+        self.compiler.is_body = false; // this method is a task's body, unset it for building preconditions
         preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(OperandType::B(true)))))?;
         let preconditions = mem::take(&mut self.compiler.bytecode);
         let wants = optimization::build_wants(&preconditions)?;
@@ -506,6 +508,7 @@ impl StatementVisitor<(), Error> for Domain {
             }
             Ok(())
         } else {
+            // println!("Building task {}", name);
             if let Some(Binding{class_type, variable_name}) = binding {
                 self.compiler.binding = Some(Binding{class_type:class_type.clone(), variable_name:variable_name.clone()});
                 let count = if let Some(v) = self.compiler.type_map.get(class_type) { v.len() } else {
