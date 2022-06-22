@@ -198,7 +198,7 @@ impl Inertia {
             (_, Inertia::Any) => true,
             (_, Inertia::Some) => true,
             (_, Inertia::None) => false,
-            (Inertia::NotItem(want), Inertia::Item(have)) => todo!(),
+            (Inertia::NotItem(want), Inertia::Item(have)) => want != have,
             (Inertia::NotItem(want), Inertia::NotItem(have)) => todo!(),
             (Inertia::NotItem(want), Inertia::Greater(have)) => todo!(),
             (Inertia::NotItem(want), Inertia::GreaterOrEquals(have)) => todo!(),
@@ -298,10 +298,12 @@ pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inert
     // println!("Building Inertia on {:?}", preconditions);
     let mut inertias = vec![Inertia::Item(OperandType::B(true))];
     use Operation::*;
+    println!("Preconditions {:?}", preconditions);
     for op in preconditions.iter().rev() {
-        // println!("{:?} in {:?}", op, preconditions);
+        println!("{:?} in {:?}", op, inertias);
         match op {
-            And => (),
+            And |
+            Or => { let last = inertias.last().unwrap().clone(); inertias.push(last)},
             Equals | Greater => inertias.push(Inertia::Depends(*op, None)),
             Push(literal) => { 
                 //if 
@@ -328,11 +330,26 @@ pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inert
                 // println!("Setting var#{} Inertia to {:?}", idx, want);
                 // println!("Want stack: {:?}", Inertia);
                 wants_map.insert(*idx, want);
+            },
+            Not => {
+                
+                match inertias.pop().unwrap() {
+                    Inertia::Item(val) => inertias.push(Inertia::NotItem(val)),
+                    Inertia::NotItem(val) => inertias.push(Inertia::Item(val)),
+                    Inertia::Greater(val) => inertias.push(Inertia::SmallerOrEquals(val)),
+                    Inertia::GreaterOrEquals(val) => inertias.push(Inertia::Smaller(val)),
+                    Inertia::Smaller(val) => inertias.push(Inertia::GreaterOrEquals(val)),
+                    Inertia::SmallerOrEquals(val) => inertias.push(Inertia::Greater(val)),
+                    Inertia::Depends(_, _) => todo!(),
+                    Inertia::Any => inertias.push(Inertia::None),
+                    Inertia::Some => inertias.push(Inertia::Some),
+                    Inertia::None => inertias.push(Inertia::Any),  
+                }
             }
             // Greater => {
 
             // }
-            _ => todo!("Add more operations.")
+            _ => {println!("Unsupported operation: {:?}", op); todo!("Add more operations.")}
         }
     }
     Ok(wants_map)

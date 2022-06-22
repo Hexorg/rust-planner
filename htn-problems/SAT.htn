@@ -1,0 +1,30 @@
+
+task Main((a1|a2|a3)&(a1|a2|a3)&(a1|!a2|a3)&(a1|!a2|!a3)&(!a1|a2|a3)&(!a1|a2|!a3)&(!a1|!a2|a3)&(!a1|!a2|!a3)):
+	test = complete()
+
+task a1(!a1):
+	enable(a1)
+effects:
+	a1 = true
+task a2(!a2):
+	enable(a2)
+effects:
+	a2 = true
+task a3(!a3):
+	enable(a3)
+effects:
+	a3 = true
+
+
+task na1(a1):
+	disable(a1)
+effects:
+	a1 = false
+task na2(a2):
+	disable(a2)
+effects:
+	a2 = false
+task na3(a3):
+	disable(a3)
+effects:
+	a3 = false

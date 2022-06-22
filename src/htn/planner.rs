@@ -103,7 +103,6 @@ impl Planner {
         if plan.0.len() > 40 && task_id == self.domain.get_main_id() {
             return Ok(true)
         }
-
         let task = self.domain.tasks.get(task_id).unwrap();
         let mut goal_state = state.clone();
         goal_state.admit(task.get_wants());

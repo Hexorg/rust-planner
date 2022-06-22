@@ -613,7 +613,7 @@ impl Domain {
             for (iy, y) in self.tasks.iter().enumerate() {
                 if iy != i {
                     let y_wants = y.get_wants();
-                    let mut should_add = false;
+                    let mut should_add = true;
                     for (xid, provides) in x_provides {
                         if y_wants.contains_key(xid) {
                             if y_wants.get(xid).unwrap().satisfies(provides) {

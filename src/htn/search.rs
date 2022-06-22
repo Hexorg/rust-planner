@@ -49,10 +49,11 @@ impl Node {
         let mut fScore = HashMap::<State, i32>::new();
 
         let currentCost = heuristic(&start);
+        // println!("Start state is {:?}", start.state);
         gScore.insert(start.state.clone(),  0.into()); // Cost to reach N
         fScore.insert(start.state.clone(), currentCost); // Estimated total path cost if it goes through N
-        openSet.push(start, Reverse(currentCost.clone()));
-        // println!("Start state is {:?}", start);
+        openSet.push(start, Reverse(currentCost));
+        
         
         while let Some((mut current, total_plan_cost)) = openSet.pop() {
             statistics.astar_visited_nodes += 1;
@@ -74,10 +75,9 @@ impl Node {
                     if !gScore.contains_key(&new_state) || tentative_gScore < gScore[&new_state] {
                         let new_node = Node::new(&new_state, *task_id);
                         let new_cost = tentative_gScore + heuristic(&new_node);
-                        // println!("Adding hop from {} to {}", task_name.clone(), current.task_name.clone());
+                        // println!("Adding hop from {} to {}", task_id, current.task_id);
                         cameFrom.insert(new_node.clone(), current.clone());
                         if !fScore.contains_key(&new_state) {
-                            // println!("New task {} gets us closer to the goal (score {})", task.name().unwrap(), tentative_gScore);
                             openSet.push(new_node, Reverse(new_cost));
                         }
                         gScore.insert(new_state.clone(), tentative_gScore);

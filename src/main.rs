@@ -10,7 +10,7 @@ use htn::planner::Planner;
 fn main() {
     let type_map = HashMap::<&str, Vec<&str>>::new();
     //type_map.insert("Cell", vec!["cell0", "cell1", "cell2", "cell3", "cell4", "cell5", "cell6"]);
-    let domain = match Domain::from_file("htn-problems/testing.htn", type_map) {
+    let domain = match Domain::from_file("htn-problems/SAT.htn", type_map) {
         Ok(domain) => domain,
         Err(e) => {eprintln!("{}", e); panic!()},
     };
@@ -28,7 +28,9 @@ fn main() {
     // state.set(*vid.get("left.bottom").unwrap(), I(3));
     // state.set(*vid.get("left.middle").unwrap(), I(2));
     // state.set(*vid.get("left.top").unwrap(), I(1));
-    // state.set(*vid.get("cell0").unwrap(), B(true));
+    state.set(*vid.get("a1").unwrap(), B(false));
+    state.set(*vid.get("a2").unwrap(), B(false));
+    state.set(*vid.get("a3").unwrap(), B(false));
     // state.set(*vid.get("cell1").unwrap(), B(true));
     // state.set(*vid.get("cell2").unwrap(), B(false));
     // state.set(*vid.get("cell3").unwrap(), B(false));
@@ -43,7 +45,7 @@ fn main() {
     for op in plan.0 {
         match op {
             htn::domain::Operation::ReadBlackboard(idx) => stack.push(blackboard[idx]),
-            htn::domain::Operation::WriteBlackboard(idx) => print!("{} = ", blackboard[idx]),
+            htn::domain::Operation::WriteBlackboard(idx) => println!("^ -> Store into {}", blackboard[idx]),
             htn::domain::Operation::CallOperator(idx, arity) => println!("{}({})", operators[idx], {
                 let mut i = stack.iter().take(arity);
                 let args = i.by_ref().take(1).fold(String::new(), |acc,item| acc + item);
