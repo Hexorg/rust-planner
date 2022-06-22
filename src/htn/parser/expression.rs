@@ -113,7 +113,7 @@ impl Expr {
         }
     }
 
-    pub fn line_no(&self) -> usize {
+    pub fn _line_no(&self) -> usize {
         match self {
             Self::Binary(_, tok, _) |
             Self::Grouping(_, tok) |

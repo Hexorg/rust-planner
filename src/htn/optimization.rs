@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use super::{parser::{expression::ExpressionVisitor, tokens::{Token, TokenData}}, domain::Operation};
+use super::{domain::Operation};
 use super::domain::{self, OperandType};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum Inertia {
     Item(OperandType),
@@ -186,6 +187,7 @@ impl Inertia {
             _ => Err(domain::Error::Domain(String::new(), format!("Unexpected want combination: {:?} and {:?}.", self, other))),
         }
     }
+    #[allow(unused_variables)]
     pub fn satisfies(&self, provides:&Inertia) -> bool {
         match (self, provides) {
             (Inertia::Item(want), Inertia::Item(have)) => want == have,

@@ -402,7 +402,7 @@ impl ExpressionVisitor<(), Error> for ExpressionCompiler {
         group.accept(self)
     }
 
-    fn visit_literal_expr(&mut self, token: &Token, data:&tokens::Literal) -> Result<(), Error> {
+    fn visit_literal_expr(&mut self, token: &Token, _:&tokens::Literal) -> Result<(), Error> {
         use std::convert::TryFrom;
         Ok(self.bytecode.push(Operation::Push(OperandType::try_from(token)?)))
     }
@@ -473,8 +473,8 @@ impl ExpressionVisitor<(), Error> for ExpressionCompiler {
 
 
 impl StatementVisitor<(), Error> for Domain {
-    fn visit_method(&mut self, _:&Token, name:&str, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, else_cost:Option<i32>, else_body:Option<&Stmt>) -> Result<(), Error> {
-        // println!("Building method {} is_body = {}", name, self.compiler.is_body);
+    fn visit_method(&mut self, _:&Token, _name:&str, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, else_cost:Option<i32>, else_body:Option<&Stmt>) -> Result<(), Error> {
+        // println!("Building method {} is_body = {}", _name, self.compiler.is_body);
         self.compiler.is_body = false; // this method is a task's body, unset it for building preconditions
         preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(OperandType::B(true)))))?;
         let preconditions = mem::take(&mut self.compiler.bytecode);
@@ -690,6 +690,8 @@ impl Domain {
 
         match domain.compile(filepath, false) {
             Ok(_) => {
+                domain.config.neighbor_detection = NeighborDetectionAlgorithm::VariableSetIntersection;
+                domain.config.heuristic_algorithm = HeuristicAlgorithm::ManhattanDistance;
                 domain.config.optimize_max();
                 match domain.config.neighbor_detection {
                     NeighborDetectionAlgorithm::Inertia => domain.build_neighbor_map_based_on_inertia(),

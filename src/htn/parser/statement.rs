@@ -80,7 +80,7 @@ impl StatementVisitor<(), std::fmt::Error> for StmtFormatter<'_, '_> {
         preconditions.and_then(|p| Some(write!(self.f, "({})", p))).unwrap_or(Ok(()))?;
         binding.and_then(|Binding{class_type, variable_name}| Some(write!(self.f, " on {} as {}", class_type, variable_name))).unwrap_or(Ok(()))?;
         cost.and_then(|c| Some(write!(self.f, " cost {}", c))).unwrap_or(Ok(()))?;
-        write!(self.f, ":");
+        write!(self.f, ":")?;
         body.accept(self)?;
         if let Some(effects) = effects {
             write!(self.f, "{:>depth$}effects:", "", depth=self.depth)?;

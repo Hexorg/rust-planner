@@ -1,9 +1,8 @@
-use std::time::Duration;
-use std::{fmt, collections::HashMap, rc::Rc, cmp::Reverse, ops::Deref};
+use std::{fmt, collections::HashMap, cmp::Reverse};
 
 
 use priority_queue::PriorityQueue;
-use super::{domain::{Domain, Operation, Task, ComplexTask, PrimitiveTask, HeuristicAlgorithm}, search::{Node, Astar}, vm::State};
+use super::{domain::{Domain, Operation, Task, ComplexTask, PrimitiveTask, HeuristicAlgorithm}, search::{Node, a_star}, vm::State};
 
 #[derive(Debug)]
 pub struct Error(String);
@@ -48,12 +47,6 @@ impl Statistics {
             calls_to_eval: 0,
         }
     }
-
-    #[inline]
-    pub fn reset(&mut self) {
-        self.astar_visited_nodes = 0;
-        self.calls_to_astar = 0;
-    }
 }
 
 
@@ -69,6 +62,7 @@ impl Planner {
     pub fn new_state(&self) -> State { 
         State::new(self.domain.get_state_mapping().len())
     }
+    #[allow(dead_code)]
     pub fn set_cost(&mut self, task_id:usize, cost:f32) {
         self.task_duration.insert(task_id, cost);
     }
@@ -112,14 +106,14 @@ impl Planner {
         };
         match task {
             Task::Complex(ComplexTask { preconditions, cost, body, effects,.. }) => {
-                if let Some((task_plan, _task_plan_cost)) = Astar(Node::new(state, usize::MAX), preconditions, heuristic, self, stats) {
+                if let Some((task_plan, _task_plan_cost)) = a_star(Node::new(state, usize::MAX), preconditions, heuristic, self, stats) {
                     for subtask in task_plan {
                         self.run_astar(plan, state, stats, subtask)?;
                     }
 
                     let mut method_plans = PriorityQueue::new();
                     for (method_id, method) in body.iter().enumerate() {
-                        if let Some((mut method_plan, method_plan_cost)) = Astar(Node::new(state, usize::MAX), &method.preconditions, heuristic, self, stats) {
+                        if let Some((mut method_plan, method_plan_cost)) = a_star(Node::new(state, usize::MAX), &method.preconditions, heuristic, self, stats) {
                             method_plan.push(method_id);
                             method_plans.push(method_plan, Reverse(method_plan_cost+cost));
                         }
@@ -141,8 +135,8 @@ impl Planner {
                     Ok(false)
                 }
             },
-            Task::Primitive(PrimitiveTask { preconditions, cost, body, effects,..}) => {
-                if let Some((task_plan, _task_plan_cost)) = Astar(Node::new(state, usize::MAX), preconditions, heuristic, self, stats) {
+            Task::Primitive(PrimitiveTask { preconditions, body, effects,..}) => {
+                if let Some((task_plan, _task_plan_cost)) = a_star(Node::new(state, usize::MAX), preconditions, heuristic, self, stats) {
                     for subtask in task_plan {
                         self.run_astar(plan, state, stats, subtask)?;
                     }

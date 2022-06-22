@@ -268,7 +268,7 @@ impl Parser {
         // let token_id = self.idx-1;
         pexpect!(self, TokenData::Label(_), {
             let name: Token = self.tokens[self.idx-1].clone();
-            let mut preconditions = self.parse_preconditions()?; 
+            let preconditions = self.parse_preconditions()?; 
             let binding = ptest!(self, TokenData::On, {
                 let class_type = pexpect!(self, TokenData::Label(s), {s}, "Expected label after on.")?.clone();
                 pexpect!(self, TokenData::As, {()}, "Expected 'as'.")?;
@@ -311,8 +311,8 @@ impl Parser {
     }
     fn method_statement(&mut self) -> Result<Stmt, Error> {
         pexpect!(self, TokenData::Label(_), {
-            let mut name: Token = self.tokens[self.idx-1].clone();
-            let mut preconditions = self.parse_preconditions()?;
+            let name: Token = self.tokens[self.idx-1].clone();
+            let preconditions = self.parse_preconditions()?;
             let cost = self.parse_cost()?;
             let body = Box::new(self.parse_body()?);
             let mut else_cost = None;
@@ -362,7 +362,7 @@ impl Parser {
         // println!("After parsing a statement, next token is {}.", self.tokens[self.idx]);
         r
     }
-    fn print_tokens(tokens: &Vec<Token>) {
+    fn _print_tokens(tokens: &Vec<Token>) {
         let mut depth = 0;
         println!("{}", tokens.iter().fold(String::new(), |acc, item| {
                 let item_string = match item.t {
@@ -390,7 +390,7 @@ impl Parser {
             Ok(tokens) => Parser{idx:0, tokens, ast:Vec::new(), errors:Vec::new()},
             Err(e) => { return Err(vec![e]); }
         };
-        // Parser::print_tokens(&parser.tokens);
+        // Parser::_print_tokens(&parser.tokens);
         while parser.idx + 1 < parser.tokens.len() {
             match parser.statement() {
                 Ok(s) => parser.ast.push(s),

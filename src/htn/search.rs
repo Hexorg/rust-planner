@@ -18,80 +18,66 @@ impl Node {
     }
 }
 
-
-// impl Astar {
-    fn reconstruct_path(came_from:HashMap<Node, Node>, current:&Node) -> Vec<usize> {
-        let mut plan = Vec::<usize>::new();
-        // println!("Reconstructing path to {}... ", current.task_name);
-        // println!("Came_from is {:?}", came_from);
+fn reconstruct_path(came_from:HashMap<Node, Node>, current:&Node) -> Vec<usize> {
+    let mut plan = Vec::<usize>::new();
+    plan.push(current.task_id);
+    let mut current = current;
+    while came_from.contains_key(&current) {
+        current = &came_from[&current];
         plan.push(current.task_id);
-        let mut current = current;
-        while came_from.contains_key(&current) {
-            current = &came_from[&current];
-            plan.push(current.task_id);
-        }
-        // println!();
-        return plan.iter().rev().skip(1).map(|idx| *idx).collect();
     }
+    return plan.iter().rev().skip(1).map(|idx| *idx).collect(); 
+}
 
-    /// Outputs a plan UP TO goal, but not including goal
-    pub fn Astar<F>(start:Node, goal:&Vec<Operation>, heuristic: F, planner:&Planner, statistics:&mut Statistics) -> Option<(Vec<usize>, i32)>
-        where  F: Fn(&Node)->i32 {
-        statistics.calls_to_astar += 1;
-        let mut openSet = PriorityQueue::new();
-        let mut cameFrom:HashMap<Node, Node> = HashMap::new();
+/// Outputs a plan UP TO goal, but not including goal
+pub fn a_star<F>(start:Node, goal:&Vec<Operation>, heuristic: F, planner:&Planner, statistics:&mut Statistics) -> Option<(Vec<usize>, i32)>
+    where  F: Fn(&Node)->i32 {
+    statistics.calls_to_astar += 1;
+    let mut open_set = PriorityQueue::new();
+    let mut came_from:HashMap<Node, Node> = HashMap::new();
 
-        // For node n, gScore[n] is the cost of the cheapest path from start to n currently known.
-        let mut gScore = HashMap::<State, i32>::new();
+    // AKA gScore
+    let mut cheapest_known_cost_to_state = HashMap::<State, i32>::new();
 
-        // For node n, fScore[n] := gScore[n] + h(n). fScore[n] represents our current best guess as to
-        // how short a path from start to finish can be if it goes through n.
-        let mut fScore = HashMap::<State, i32>::new();
+    // AKA fScore
+    let mut estimated_cost_to_goal_through_state = HashMap::<State, i32>::new();
 
-        let currentCost = heuristic(&start);
-        // println!("Start state is {:?}", start.state);
-        gScore.insert(start.state.clone(),  0.into()); // Cost to reach N
-        fScore.insert(start.state.clone(), currentCost); // Estimated total path cost if it goes through N
-        openSet.push(start, Reverse(currentCost));
-        
-        
-        while let Some((mut current, total_plan_cost)) = openSet.pop() {
-            statistics.astar_visited_nodes += 1;
+    let estimated_cost_to_goal = heuristic(&start);
+    // println!("Start state is {:?}", start.state);
+    cheapest_known_cost_to_state.insert(start.state.clone(),  0.into()); // Cost to reach N
+    estimated_cost_to_goal_through_state.insert(start.state.clone(), estimated_cost_to_goal); // Estimated total path cost if it goes through N
+    open_set.push(start, Reverse(estimated_cost_to_goal));
+    
+    while let Some((mut current, total_plan_cost)) = open_set.pop() {
+        statistics.astar_visited_nodes += 1;
+        statistics.calls_to_eval += 1;
+        if current.state.eval(goal).unwrap().is_true() {
+            return Some((reconstruct_path(came_from, &current), total_plan_cost.0));
+        }
+        let all_tasks = (0..planner.domain.tasks.len()).filter(|i| *i != planner.domain.get_main_id()).collect();
+        let neighbors = planner.domain.neighbors.get(&current.task_id).unwrap_or(&all_tasks);
+        for task_id in neighbors {
+            // println!("Can we run {}? ", task_name);
+            let (task, cost) = planner.get_task_and_cost(*task_id);
             statistics.calls_to_eval += 1;
-            if current.state.eval(goal).unwrap().is_true() {
-                return Some((reconstruct_path(cameFrom, &current), total_plan_cost.0));
-            }
-            let all_tasks = (0..planner.domain.tasks.len()).filter(|i| *i != planner.domain.get_main_id()).collect();
-            let neighbors = planner.domain.neighbors.get(&current.task_id).unwrap_or(&all_tasks);
-            for task_id in neighbors {
-                // println!("Can we run {}? ", task_name);
-                let (task, cost) = planner.get_task_and_cost(*task_id);
+            if current.state.eval(task.preconditions()).unwrap().is_true() {
+                let cost_to_neighboring_task = cheapest_known_cost_to_state.get(&current.state).unwrap_or(&i32::MAX).clone() + cost;
+                let mut new_state = current.state.clone();
                 statistics.calls_to_eval += 1;
-                if current.state.eval(task.preconditions()).unwrap().is_true() {
-                    let tentative_gScore = gScore.get(&current.state).unwrap_or(&i32::MAX).clone() + cost;
-                    let mut new_state = current.state.clone();
-                    statistics.calls_to_eval += 1;
-                    new_state.eval(task.effects());
-                    if !gScore.contains_key(&new_state) || tentative_gScore < gScore[&new_state] {
-                        let new_node = Node::new(&new_state, *task_id);
-                        let new_cost = tentative_gScore + heuristic(&new_node);
-                        // println!("Adding hop from {} to {}", task_id, current.task_id);
-                        cameFrom.insert(new_node.clone(), current.clone());
-                        if !fScore.contains_key(&new_state) {
-                            openSet.push(new_node, Reverse(new_cost));
-                        }
-                        gScore.insert(new_state.clone(), tentative_gScore);
-                        fScore.insert(new_state, new_cost);
-                    } else {
-                        // println!("This task provides an existing state");
+                new_state.eval(task.effects());
+                if !cheapest_known_cost_to_state.contains_key(&new_state) || cost_to_neighboring_task < cheapest_known_cost_to_state[&new_state] {
+                    let new_node = Node::new(&new_state, *task_id);
+                    let new_cost = cost_to_neighboring_task + heuristic(&new_node);
+                    // println!("Adding hop from {} to {}", task_id, current.task_id);
+                    came_from.insert(new_node.clone(), current.clone());
+                    if !estimated_cost_to_goal_through_state.contains_key(&new_state) {
+                        open_set.push(new_node, Reverse(new_cost));
                     }
-                } else {
-                    // println!("conditions are NOT satisfied");
+                    cheapest_known_cost_to_state.insert(new_state.clone(), cost_to_neighboring_task);
+                    estimated_cost_to_goal_through_state.insert(new_state, new_cost);
                 }
             }
-            // println!("No more neighbors");
-            // println!("There are {} reachable nodes", openSet.len());
         }
-        return None;
     }
-// }
+    return None;
+}
