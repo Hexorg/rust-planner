@@ -76,7 +76,8 @@ impl State {
                 Operation::ReadBlackboard(_) |
                 Operation::WriteBlackboard(_) |
                 Operation::PlanTask(_) |
-                Operation::CallOperator(_, _) => (),
+                Operation::CallOperator(_, _) |
+                Operation::OrNot => (),
             }
         }
         stack.pop()
@@ -119,14 +120,14 @@ impl State {
                     Operation::SmallerOrEquals => self.set(*k, self.get(idx.unwrap())),
                     Operation::Not => self.set(*k, !self.get(idx.unwrap())),
                     Operation::And => todo!(),
-                    Operation::Or => todo!(),
+                    Operation::Or => self.set(*k, self.get(idx.unwrap())),
                     Operation::Subtract => todo!(),
                     Operation::Add => todo!(),
                     Operation::Multiply => todo!(),
                     Operation::Divide => todo!(),
                     _ => (),
                 },
-                Inertia::Any => (),
+                Inertia::Fluent => (),
                 Inertia::Some => (),
                 Inertia::None => (),
             }

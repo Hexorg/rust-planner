@@ -102,6 +102,7 @@ pub enum Operation {
     Not, 
     And,
     Or,
+    OrNot, // used in inertia calculation only
     Subtract,
     Add,
     Multiply,

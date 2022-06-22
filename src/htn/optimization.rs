@@ -15,9 +15,9 @@ pub enum Inertia {
     Smaller(OperandType),
     SmallerOrEquals(OperandType),
     Depends(Operation, Option<usize>), // Depends on the variable
-    Any, // no constraints, eg. preconditions are (true)
-    Some, // Can't determine statically
-    None // Can't satisfy constraints. preconditions are unreachable.
+    Fluent, // no constraints, eg. preconditions are (true)
+    Some, // Can't determine staticall
+    None, // Can't satisfy constraints. preconditions are unreachable.
 }
 
 impl Inertia {
@@ -25,7 +25,7 @@ impl Inertia {
         let inertia = match self {
             Self::Item(OperandType::B(v)) => *v,
             Self::NotItem(OperandType::B(v)) => !*v,
-            Self::Any => true,
+            Self::Fluent => true,
             _ => return Ok(Inertia::None) // (? == 5) can never result in, e.g. 124
         };
         // println!("bool_eval({:?}, {:?} has {} inertia.", op, arg, inertia);
@@ -36,7 +36,7 @@ impl Inertia {
             (true, SmallerOrEquals) => Inertia::SmallerOrEquals(arg),
             (true, Greater) => Inertia::Greater(arg),
             (true, GreaterOrEquals) => Inertia::GreaterOrEquals(arg),
-            (true, And) => if arg.is_true() { Inertia::Any} else {Inertia::None},
+            (true, And) => if arg.is_true() { Inertia::Fluent} else {Inertia::None},
 
             
             (false, Equals) => Inertia::NotItem(arg),
@@ -44,9 +44,9 @@ impl Inertia {
             (false, SmallerOrEquals) => Inertia::Greater(arg),
             (false, Greater) => Inertia::SmallerOrEquals(arg) ,
             (false, GreaterOrEquals) => Inertia::Smaller(arg),
-            (false, And) => if arg.is_true() { Inertia::None} else {Inertia::Any},
+            (false, And) => if arg.is_true() { Inertia::None} else {Inertia::Fluent},
             (_, Not) => Inertia::Item(OperandType::B(!inertia)),
-            (_, Or) => if arg.is_true() { Inertia::Any} else {Inertia::Item(OperandType::B(inertia))},
+            (_, Or) => if arg.is_true() { Inertia::Fluent} else {Inertia::Item(OperandType::B(inertia))},
             _ => todo!("More operations...?")
             // _ => return Err(domain::Error::Domain(String::new(), "Unexpected operation."))
         })
@@ -68,16 +68,17 @@ impl Inertia {
                 Operation::SmallerOrEquals => Inertia::Depends(Operation::Greater, *var),
                 Operation::Not => Inertia::Depends(Operation::Equals, *var),
                 Operation::And => todo!(),
-                Operation::Or => todo!(),
+                Operation::Or => Inertia::Depends(Operation::Or, *var),
+                Operation::OrNot => Inertia::Depends(Operation::OrNot, *var),
                 Operation::Subtract => todo!(),
                 Operation::Add => todo!(),
                 Operation::Multiply => todo!(),
                 Operation::Divide => todo!(),
                 _ => panic!("Unsupported operation.")
             }
-            Inertia::Any => Inertia::None,
+            Inertia::Fluent => Inertia::None,
             Inertia::Some => Inertia::Some,
-            Inertia::None => Inertia::Any,
+            Inertia::None => Inertia::Fluent,
         }
     }
 
@@ -91,7 +92,7 @@ impl Inertia {
             (Inertia::Item(_), Inertia::Smaller(_)) => todo!(),
             (Inertia::Item(_), Inertia::SmallerOrEquals(_)) => todo!(),
             (Inertia::Item(_), Inertia::Depends(op, None)) => self.bool_eval(op, arg),
-            (Inertia::Item(_), Inertia::Any) => todo!(),
+            (Inertia::Item(_), Inertia::Fluent) => todo!(),
             (Inertia::Item(_), Inertia::Some) => todo!(),
             (Inertia::Item(_), Inertia::None) => todo!(),
             (Inertia::NotItem(_), Inertia::Item(_)) => todo!(),
@@ -101,7 +102,7 @@ impl Inertia {
             (Inertia::NotItem(_), Inertia::Smaller(_)) => todo!(),
             (Inertia::NotItem(_), Inertia::SmallerOrEquals(_)) => todo!(),
             (Inertia::NotItem(_), Inertia::Depends(_, _)) => todo!(),
-            (Inertia::NotItem(_), Inertia::Any) => todo!(),
+            (Inertia::NotItem(_), Inertia::Fluent) => todo!(),
             (Inertia::NotItem(_), Inertia::Some) => todo!(),
             (Inertia::NotItem(_), Inertia::None) => todo!(),
             (Inertia::Greater(_), Inertia::Item(_)) => todo!(),
@@ -111,7 +112,7 @@ impl Inertia {
             (Inertia::Greater(_), Inertia::Smaller(_)) => todo!(),
             (Inertia::Greater(_), Inertia::SmallerOrEquals(_)) => todo!(),
             (Inertia::Greater(_), Inertia::Depends(_, _)) => todo!(),
-            (Inertia::Greater(_), Inertia::Any) => todo!(),
+            (Inertia::Greater(_), Inertia::Fluent) => todo!(),
             (Inertia::Greater(_), Inertia::Some) => todo!(),
             (Inertia::Greater(_), Inertia::None) => todo!(),
             (Inertia::GreaterOrEquals(_), Inertia::Item(_)) => todo!(),
@@ -121,7 +122,7 @@ impl Inertia {
             (Inertia::GreaterOrEquals(_), Inertia::Smaller(_)) => todo!(),
             (Inertia::GreaterOrEquals(_), Inertia::SmallerOrEquals(_)) => todo!(),
             (Inertia::GreaterOrEquals(_), Inertia::Depends(_, _)) => todo!(),
-            (Inertia::GreaterOrEquals(_), Inertia::Any) => todo!(),
+            (Inertia::GreaterOrEquals(_), Inertia::Fluent) => todo!(),
             (Inertia::GreaterOrEquals(_), Inertia::Some) => todo!(),
             (Inertia::GreaterOrEquals(_), Inertia::None) => todo!(),
             (Inertia::Smaller(_), Inertia::Item(_)) => todo!(),
@@ -131,7 +132,7 @@ impl Inertia {
             (Inertia::Smaller(_), Inertia::Smaller(_)) => todo!(),
             (Inertia::Smaller(_), Inertia::SmallerOrEquals(_)) => todo!(),
             (Inertia::Smaller(_), Inertia::Depends(_, _)) => todo!(),
-            (Inertia::Smaller(_), Inertia::Any) => todo!(),
+            (Inertia::Smaller(_), Inertia::Fluent) => todo!(),
             (Inertia::Smaller(_), Inertia::Some) => todo!(),
             (Inertia::Smaller(_), Inertia::None) => todo!(),
             (Inertia::SmallerOrEquals(_), Inertia::Item(_)) => todo!(),
@@ -141,7 +142,7 @@ impl Inertia {
             (Inertia::SmallerOrEquals(_), Inertia::Smaller(_)) => todo!(),
             (Inertia::SmallerOrEquals(_), Inertia::SmallerOrEquals(_)) => todo!(),
             (Inertia::SmallerOrEquals(_), Inertia::Depends(_, _)) => todo!(),
-            (Inertia::SmallerOrEquals(_), Inertia::Any) => todo!(),
+            (Inertia::SmallerOrEquals(_), Inertia::Fluent) => todo!(),
             (Inertia::SmallerOrEquals(_), Inertia::Some) => todo!(),
             (Inertia::SmallerOrEquals(_), Inertia::None) => todo!(),
             (Inertia::Depends(_, _), Inertia::Item(_)) => todo!(),
@@ -151,19 +152,19 @@ impl Inertia {
             (Inertia::Depends(_, _), Inertia::Smaller(_)) => todo!(),
             (Inertia::Depends(_, _), Inertia::SmallerOrEquals(_)) => todo!(),
             (Inertia::Depends(_, _), Inertia::Depends(_, _)) => todo!(),
-            (Inertia::Depends(_, _), Inertia::Any) => todo!(),
+            (Inertia::Depends(_, _), Inertia::Fluent) => todo!(),
             (Inertia::Depends(_, _), Inertia::Some) => todo!(),
             (Inertia::Depends(_, _), Inertia::None) => todo!(),
-            (Inertia::Any, Inertia::Item(_)) => todo!(),
-            (Inertia::Any, Inertia::NotItem(_)) => todo!(),
-            (Inertia::Any, Inertia::Greater(_)) => todo!(),
-            (Inertia::Any, Inertia::GreaterOrEquals(_)) => todo!(),
-            (Inertia::Any, Inertia::Smaller(_)) => todo!(),
-            (Inertia::Any, Inertia::SmallerOrEquals(_)) => todo!(),
-            (Inertia::Any, Inertia::Depends(_, _)) => todo!(),
-            (Inertia::Any, Inertia::Any) => todo!(),
-            (Inertia::Any, Inertia::Some) => todo!(),
-            (Inertia::Any, Inertia::None) => todo!(),
+            (Inertia::Fluent, Inertia::Item(_)) => todo!(),
+            (Inertia::Fluent, Inertia::NotItem(_)) => todo!(),
+            (Inertia::Fluent, Inertia::Greater(_)) => todo!(),
+            (Inertia::Fluent, Inertia::GreaterOrEquals(_)) => todo!(),
+            (Inertia::Fluent, Inertia::Smaller(_)) => todo!(),
+            (Inertia::Fluent, Inertia::SmallerOrEquals(_)) => todo!(),
+            (Inertia::Fluent, Inertia::Depends(_, _)) => todo!(),
+            (Inertia::Fluent, Inertia::Fluent) => todo!(),
+            (Inertia::Fluent, Inertia::Some) => todo!(),
+            (Inertia::Fluent, Inertia::None) => todo!(),
             (Inertia::Some, Inertia::Item(_)) => todo!(),
             (Inertia::Some, Inertia::NotItem(_)) => todo!(),
             (Inertia::Some, Inertia::Greater(_)) => todo!(),
@@ -171,7 +172,7 @@ impl Inertia {
             (Inertia::Some, Inertia::Smaller(_)) => todo!(),
             (Inertia::Some, Inertia::SmallerOrEquals(_)) => todo!(),
             (Inertia::Some, Inertia::Depends(_, _)) => todo!(),
-            (Inertia::Some, Inertia::Any) => todo!(),
+            (Inertia::Some, Inertia::Fluent) => todo!(),
             (Inertia::Some, Inertia::Some) => todo!(),
             (Inertia::Some, Inertia::None) => todo!(),
             (Inertia::None, Inertia::Item(_)) => todo!(),
@@ -181,7 +182,7 @@ impl Inertia {
             (Inertia::None, Inertia::Smaller(_)) => todo!(),
             (Inertia::None, Inertia::SmallerOrEquals(_)) => todo!(),
             (Inertia::None, Inertia::Depends(_, _)) => todo!(),
-            (Inertia::None, Inertia::Any) => todo!(),
+            (Inertia::None, Inertia::Fluent) => todo!(),
             (Inertia::None, Inertia::Some) => todo!(),
             (Inertia::None, Inertia::None) => todo!(),
             _ => Err(domain::Error::Domain(String::new(), format!("Unexpected want combination: {:?} and {:?}.", self, other))),
@@ -197,7 +198,7 @@ impl Inertia {
             (Inertia::Item(want), Inertia::Smaller(have)) => want < have,
             (Inertia::Item(want), Inertia::SmallerOrEquals(have)) => want <= have,
             (_, Inertia::Depends(_, _)) => true,
-            (_, Inertia::Any) => true,
+            (_, Inertia::Fluent) => true,
             (_, Inertia::Some) => true,
             (_, Inertia::None) => false,
             (Inertia::NotItem(want), Inertia::Item(have)) => want != have,
@@ -231,7 +232,7 @@ impl Inertia {
             (Inertia::SmallerOrEquals(_), Inertia::Smaller(_)) => todo!(),
             (Inertia::SmallerOrEquals(_), Inertia::SmallerOrEquals(_)) => todo!(),
             (Inertia::Depends(_, _), _) => true,
-            (Inertia::Any, _) => true,
+            (Inertia::Fluent, _) => true,
             (Inertia::Some, _) => true,
             (Inertia::None, _) => false,
 
@@ -262,6 +263,7 @@ pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Inertia>) -
             Operation::GreaterOrEquals => todo!(),
             Operation::SmallerOrEquals => todo!(),
             Operation::Not => todo!(),
+            Operation::OrNot => todo!(),
             Operation::And => todo!(),
             Operation::Or => todo!(),
             Operation::Subtract => {
@@ -275,7 +277,7 @@ pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Inertia>) -
                         Inertia::Smaller(val) => stack.push(Inertia::Smaller(val-subtracting)),
                         Inertia::SmallerOrEquals(val) => stack.push(Inertia::SmallerOrEquals(val-subtracting)),
                         Inertia::Depends(_, _) => todo!(),
-                        Inertia::Any => todo!(),
+                        Inertia::Fluent => todo!(),
                         Inertia::Some => todo!(),
                         Inertia::None => todo!(),
                     }
@@ -300,12 +302,17 @@ pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inert
     // println!("Building Inertia on {:?}", preconditions);
     let mut inertias = vec![Inertia::Item(OperandType::B(true))];
     use Operation::*;
-    println!("Preconditions {:?}", preconditions);
+    // println!("Preconditions {:?}", preconditions);
     for op in preconditions.iter().rev() {
-        println!("{:?} in {:?}", op, inertias);
+        // println!("{:?} in {:?}", op, inertias);
         match op {
-            And |
-            Or => { let last = inertias.last().unwrap().clone(); inertias.push(last)},
+            And => { let last = inertias.last().unwrap().clone(); inertias.push(last)},
+            Or => { let last = inertias.pop().unwrap(); match last {
+                Inertia::Item(OperandType::B(false)) => {inertias.push(Inertia::Depends(Operation::OrNot, None)); inertias.push(Inertia::Depends(Operation::OrNot, None))},
+                Inertia::Item(OperandType::B(true)) => {inertias.push(Inertia::Depends(Operation::Or, None)); inertias.push(Inertia::Depends(Operation::Or, None))},
+                Inertia::Depends(..) => {inertias.push(last.clone()); inertias.push(last);},
+                _ => return Err(domain::Error::Domain(String::new(), format!("'or' can never result in {:?}", last))),
+            }},
             Equals | Greater => inertias.push(Inertia::Depends(*op, None)),
             Push(literal) => { 
                 //if 
@@ -319,33 +326,44 @@ pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inert
                 inertias.push(new_want);
             },
             ReadState(idx) => {
-                let want = inertias.pop().unwrap();
+                // println!("**** READ STATE ***");
+                let mut want = inertias.pop().unwrap();
                 if let Inertia::Depends(op, want_idx) = want {
                     if want_idx.is_none() {
                         inertias.push(Inertia::Depends(op, Some(*idx)));
                     } else {
-                        let inv = Inertia::Depends(op, Some(*idx)).inverted();
-                        // println!("Setting var#{} Inertia to {:?}", want_idx.unwrap(), inv);
-                        wants_map.insert(want_idx.unwrap(), inv);
+                        let dep_want = match op {
+                            Operation::Or | Operation::OrNot => {
+                                    // Cyclic dependency - idx is Or'ed with want_idx
+                                    want = Inertia::Some;
+                                    Inertia::Some
+                                },
+                            _ => Inertia::Depends(op, Some(*idx)).inverted(),
+                        };
+                        // println!("Identified dependency: Setting {} to want {:?}", want_idx.unwrap(), dep_want);
+                        wants_map.insert(want_idx.unwrap(), dep_want);
+                        
                     }
                 }
-                // println!("Setting var#{} Inertia to {:?}", idx, want);
                 // println!("Want stack: {:?}", Inertia);
+                // println!("Setting {} to want {:?}", *idx, want);
                 wants_map.insert(*idx, want);
             },
             Not => {
                 
                 match inertias.pop().unwrap() {
-                    Inertia::Item(val) => inertias.push(Inertia::NotItem(val)),
+                    Inertia::Item(val) => if let OperandType::B(val) = val { inertias.push(Inertia::Item(OperandType::B(!val))) } else { inertias.push(Inertia::NotItem(val))},
                     Inertia::NotItem(val) => inertias.push(Inertia::Item(val)),
                     Inertia::Greater(val) => inertias.push(Inertia::SmallerOrEquals(val)),
                     Inertia::GreaterOrEquals(val) => inertias.push(Inertia::Smaller(val)),
                     Inertia::Smaller(val) => inertias.push(Inertia::GreaterOrEquals(val)),
                     Inertia::SmallerOrEquals(val) => inertias.push(Inertia::Greater(val)),
+                    Inertia::Depends(Operation::Or, some_var) => inertias.push(Inertia::Depends(Operation::OrNot, some_var)),
+                    Inertia::Depends(Operation::OrNot, some_var) => inertias.push(Inertia::Depends(Operation::Or, some_var)),
                     Inertia::Depends(_, _) => todo!(),
-                    Inertia::Any => inertias.push(Inertia::None),
+                    Inertia::Fluent => inertias.push(Inertia::None),
                     Inertia::Some => inertias.push(Inertia::Some),
-                    Inertia::None => inertias.push(Inertia::Any),  
+                    Inertia::None => inertias.push(Inertia::Fluent),  
                 }
             }
             // Greater => {

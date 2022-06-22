@@ -1,5 +1,5 @@
 
-task Main((a1|a2|a3)&(a1|a2|a3)&(a1|!a2|a3)&(a1|!a2|!a3)&(!a1|a2|a3)&(!a1|a2|!a3)&(!a1|!a2|a3)&(!a1|!a2|!a3)):
+task Main((a1|a2|a3)&(a1|a2|!a3)&(a1|!a2|a3)&(a1|!a2|!a3)&(!a1|a2|a3)&(!a1|a2|!a3)&(!a1|!a2|a3)&(!a1|!a2|!a3)):
 	test = complete()
 
 task a1(!a1):
