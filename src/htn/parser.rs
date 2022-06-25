@@ -1,7 +1,7 @@
-use std::fmt;
+use std::{fmt, iter::Peekable};
 
 pub mod tokens;
-use tokens::{TokenData, Token, Literal};
+use tokens::{Token, TokenData::*, Literal::*};
 
 pub mod lexer;
 use lexer::Lexer;
@@ -10,10 +10,10 @@ pub mod expression;
 use expression::Expr;
 
 pub mod statement;
-use statement::{Stmt, Binding};
+use statement::Stmt;
 
 
-
+#[derive(PartialEq)]
 pub struct Error {
     pub line: usize,
     pub col: usize,
@@ -34,23 +34,43 @@ impl std::error::Error for Error { }
 
 
 
-pub struct Parser {
-    idx: usize,
-    tokens: Vec<Token>,
-    ast: Vec<Stmt>,
-    errors: Vec<Error>
+pub struct Parser<'a> {
+    lexer: Peekable<Lexer<'a>>,
 }
 
-macro_rules! pexpect {
-    ($s:expr, $($p:pat)|+, $do:block, $e:literal) => {
-        if let $($p)|+ = &$s.tokens[$s.idx].t {
-            $s.idx += 1;
-            Ok($do)
+impl<'a> Iterator for Parser<'a> {
+    type Item = Result<Stmt<'a>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let None = self.lexer.peek() {
+            None
         } else {
-            Err($s.tokens[$s.idx].to_err($e))
+            Some(self.statement())
         }
     }
 }
+
+// macro_rules! punwrap {
+//     ($s:expr) => {
+//         match $s {
+//             None => return Err(Error{line:0, col:0, message:String::from("Unexpected end of file.")}),
+//             Some(Err(e)) => return Err(e),
+//             Some(Ok(r)) => r,
+//         }
+//     }
+// }
+
+
+// macro_rules! pexpect {
+//     ($s:expr, $($p:pat)|+, $do:block, $e:literal) => {
+//         match $s.lexer.peek() {
+//             $($p)|+ => {$s.lexer.next(); $do}
+//             Some(Err(e)) => return Err(Error{line:e.line, col:e.col, message:String::from($e)}),
+//             None => return Err(Error{line:0, col:0, message:String::from("Unexpected end of file.")+$e}),
+//             Some(Ok(t)) => return Err(t.to_err($e))
+//         }
+//     }
+// }
 
 
 // macro_rules! pmatch {
@@ -62,345 +82,326 @@ macro_rules! pexpect {
 //     }
 // }
 
-macro_rules! ptest {
-    ($s:expr, $($p:pat)|+, $do_match:block else $do_nomatch:block) => {
-            if let $($p)|+ = &$s.tokens[$s.idx].t {
-                $s.idx += 1;
-                $do_match
-            } else {
-                $do_nomatch
-            }
-    }
-}
+// macro_rules! ptest {
+//     ($s:expr, $($p:pat)|+, $do_match:block else $do_nomatch:block) => {
+//             if let $($p)|+ = &$s.tokens[$s.idx].t {
+//                 $s.idx += 1;
+//                 $do_match
+//             } else {
+//                 $do_nomatch
+//             }
+//     }
+// }
 
 
-impl Parser {
-    fn error_recover(&mut self) {
-        self.idx += 1;
-        while self.idx + 1 < self.tokens.len() {
-            if let TokenData::Task | TokenData::Method | TokenData::CloseParenthesis  = self.tokens[self.idx].t {
-                return;
-            }
-            if let TokenData::StatementEnd = self.tokens[self.idx].t {
-                self.idx += 1;
-                return;
-            }
-            self.idx += 1;
-        }
-    }
+impl Parser<'_> {
+    const EOF_ERROR:Error = Error{line:0, col:0, message:String::from("Unexpected end of file.")};
+    // fn error_recover(&mut self) {
+    //     self.idx += 1;
+    //     while self.idx + 1 < self.tokens.len() {
+    //         if let Token::Task{..} | Token::Method{..} | Token::CloseParenthesis{..}  = self.tokens[self.idx].t {
+    //             return;
+    //         }
+    //         if let Token::StatementEnd{..} = self.tokens[self.idx].t {
+    //             self.idx += 1;
+    //             return;
+    //         }
+    //         self.idx += 1;
+    //     }
+    // }
     fn primary(&mut self) -> Result<Expr, Error> {
-        // Literal | "(" expression ")"
-        if let TokenData::Literal(_)  = self.tokens[self.idx].t {
-            self.idx += 1;
-            Ok(Expr::Literal(self.tokens[self.idx-1].clone()))
-        } else if let TokenData::OpenParenthesis = self.tokens[self.idx].t {
-            self.idx += 1;
-            let expr = self.expression()?;
-            pexpect!(self, TokenData::CloseParenthesis, {
-                Expr::Grouping(Box::new(expr), self.tokens[self.idx].clone())
-            }, "Expected ')' after expression.")
-        } else if let TokenData::Label(_) = &self.tokens[self.idx].t {
-            
-            let mut var_tokens = Vec::<Token>::new();
-            loop {
-                var_tokens.push(self.tokens[self.idx].clone());
-                self.idx += 1;
-                if let TokenData::Dot = &self.tokens[self.idx].t { 
-                    self.idx += 1;
-                    if let TokenData::Label(_) = &self.tokens[self.idx].t {
-                         Ok(()) 
-                    } else {
-                        Err(self.tokens[self.idx].to_err("Expected label after '.'."))
-                    }?;
+        // Literal | Label | "(" expression ")"
+        match punwrap!(self.lexer.next()) {
+            token @ Token::Literal{..} => Some(Ok(Expr::Literal(token))),
+            token @ Token::Label{..} => {
+                let mut var_path = vec!(token);
+                while let Some(Ok(Token::Dot{..})) = self.lexer.peek() {
+                    self.lexer.next();
+                    pexpect!(self, token @ Token::Label, {var_path.push(token);}, "Expected identifier.");
                 }
-                else { break }
+                Some(Ok(Expr::Variable(var_path)))
+            },
+            Token::OpenParenthesis{..} => {
+                let expr = punwrap!(self.expression());
+                pexpect!(self, Token::CloseParenthesis{..}, {expr}, "Expected ')'.")
             }
-            Ok(Expr::Variable(var_tokens))
-        } else {
-            Err(self.tokens[self.idx].to_err("Expected expression."))
+            token => Some(Err(token.to_err("Expected expression.")))
         }
-
     }
+
     fn call(&mut self) -> Result<Expr, Error> {
-        let expr = self.primary()?;
-        ptest!(self, TokenData::OpenParenthesis, {
-            let mut args = Vec::<Expr>::new();
-            loop { 
-                ptest!(self, TokenData::CloseParenthesis, {
-                    break if let Expr::Variable(name) = expr {
-                        if name.len() == 1 {
-                            Ok(Expr::Call(name.get(0).unwrap().clone(), args))
-                        } else {
-                            Err(self.tokens[self.idx].to_err("Can not call object methods."))
+        let expr = punwrap!(self.primary());
+        if let Some(Ok(Token::OpenParenthesis{..})) = self.lexer.peek() {
+            self.lexer.next();
+            if let Expr::Variable(name) = expr {
+                if name.len() == 1 {
+                    let mut args = Vec::<Expr>::new();
+                    loop {
+                        if let Some(Ok(Token::CloseParenthesis{..})) = self.lexer.peek() {
+                            self.lexer.next();
+                            break
                         }
-                    } else {
-                        Err(self.tokens[self.idx-1].to_err("Expected function name before call."))
+                        args.push(punwrap!(self.expression()));
+                        match punwrap!(self.lexer.next()) {
+                            Token::Comma{..} => (),
+                            token => return Some(Err(token.to_err("Expected ','.")))
+                        }
                     }
+                    Some(Ok(Expr::Call(name[0], args)))
                 } else {
-                    args.push(self.expression()?);
-                    ptest!(self, TokenData::Comma, {} else {});
-                })
+                    Some(Err(expr.to_err("Can not call object properties.")))
+                }
+            } else {
+                Some(Err(expr.to_err("Expected identifier.")))
             }
         } else {
-            Ok(expr)
-        })
+            Some(Ok(expr))
+        }
     }
+
     fn unary(&mut self) -> Result<Expr, Error> {
-        ptest!(self, TokenData::Not | TokenData::Minus, {
-            let operator = self.tokens[self.idx-1].clone();
-            let right = self.unary()?;
-            Ok(Expr::Unary(operator, Box::new(right)))
+        if let Some(Ok(Token::Not{..} | Token::Minus{..})) = self.lexer.peek() {
+            let operator = self.lexer.next().unwrap().unwrap();
+            let right = punwrap!(self.unary());
+            Some(Ok(Expr::Unary(operator, Box::new(right))))
         } else {
             self.call()
-        }) 
+        }
     }
     fn factor(&mut self) -> Result<Expr, Error> {
-        let mut expr = self.unary()?;
-        while let TokenData::Slash | TokenData::Star  = self.tokens[self.idx].t {
-            let operator = self.tokens[self.idx].clone();
-            self.idx += 1;
-            let right = self.unary()?;
+        let mut expr = punwrap!(self.unary());
+        while let Some(Ok(Token::Slash{..} | Token::Star{..}))  = self.lexer.peek() {
+            let operator = self.lexer.next().unwrap().unwrap();
+            let right = punwrap!(self.unary());
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
-        Ok(expr)
+        Some(Ok(expr))
     }
     fn term(&mut self) -> Result<Expr, Error> {
-        let mut expr = self.factor()?;
-        while let TokenData::Minus | TokenData::Plus  = self.tokens[self.idx].t {
-            let operator = self.tokens[self.idx].clone();
-            self.idx += 1;
-            let right = self.factor()?;
+        let mut expr = punwrap!(self.factor());
+        while let Some(Ok(Token::Minus{..} | Token::Plus{..})) = self.lexer.peek() {
+            let operator = self.lexer.next().unwrap().unwrap();
+            let right = punwrap!(self.factor());
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
-        Ok(expr)
+        Some(Ok(expr))
     }
     fn comparison(&mut self) -> Result<Expr, Error> {
-        let mut expr = self.term()?;
-        while let TokenData::Greater | TokenData::GreaterOrEquals | TokenData::Smaller | TokenData::SmallerOrEquals = self.tokens[self.idx].t {
-            let operator = self.tokens[self.idx].clone();
-            self.idx += 1;
-            let right = self.term()?;
+        let mut expr = punwrap!(self.term());
+        while let Some(Ok(Token::Greater{..} | Token::GreaterOrEquals{..} | Token::Smaller{..} | Token::SmallerOrEquals{..})) = self.lexer.peek() {
+            let operator = self.lexer.next().unwrap().unwrap();
+            let right = punwrap!(self.term());
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
-        Ok(expr)
+        Some(Ok(expr))
     }
     fn equality(&mut self) -> Result<Expr, Error> {
-        let mut expr = self.comparison()?;
-        while let TokenData::NotEquals | TokenData::EqualsEquals = self.tokens[self.idx].t {
-            let operator = self.tokens[self.idx].clone();
-            self.idx += 1;
-            let right = self.comparison()?;
+        let mut expr = punwrap!(self.comparison());
+        while let Some(Ok(Token::NotEquals{..} | Token::EqualsEquals{..})) = self.lexer.peek() {
+            let operator = self.lexer.next().unwrap().unwrap();
+            let right = punwrap!(self.comparison());
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
-        Ok(expr)
+        Some(Ok(expr))
     }
     fn logic(&mut self) -> Result<Expr, Error> {
-        let mut expr = self.equality()?;
-        while let TokenData::Or | TokenData::And = self.tokens[self.idx].t {
-            let operator = self.tokens[self.idx].clone();
-            self.idx += 1;
-            let right = self.equality()?;
+        let mut expr = punwrap!(self.equality());
+        while let Some(Ok(Token::Or{..} | Token::And{..})) = self.lexer.peek() {
+            let operator = self.lexer.next().unwrap().unwrap();
+            let right = punwrap!(self.equality());
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
-        Ok(expr)
+        Some(Ok(expr))
     }
     fn assignment(&mut self) -> Result<Expr, Error> {
-        let target = self.logic()?;
-        ptest!(self, TokenData::Equals 
-            | TokenData::AddTo  
-            | TokenData::SubtractFrom
-            | TokenData::DivideBy
-            | TokenData::MultiplyBy, {
-                if let Expr::Variable(varname) = target {
-                    let line = self.tokens[self.idx-1].line;
-                    let col = self.tokens[self.idx-1].col;
-                    let value_expr = match self.tokens[self.idx-1].t {
-                        // TokenData::EQUALS => self.expression()?,
-                        TokenData::AddTo => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line, col, len:0, t:TokenData::Plus}, Box::new(self.expression()?)),
-                        TokenData::SubtractFrom => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line, col, len:0, t:TokenData::Minus}, Box::new(self.expression()?)),
-                        TokenData::MultiplyBy => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line, col, len:0, t:TokenData::Star}, Box::new(self.expression()?)),
-                        TokenData::DivideBy => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token{line, col, len:0, t:TokenData::Slash}, Box::new(self.expression()?)),
-                        _ => self.expression()?,
-                    };
-                    Ok(Expr::Assignment(varname, Box::new(value_expr)))
-                } else {
-                    let line = self.tokens[self.idx].line;
-                    let col = self.tokens[self.idx].col;
-                    Err(Error{line, col, message:String::from("Invalid assignment target.")})
-                }
-        } else {
-            Ok(target)
-        })
-    }
-    fn expression(&mut self) -> Result<Expr, Error> {
-        if let TokenData::Pass = &self.tokens[self.idx].t {
-            self.idx += 1;
-            Ok(Expr::Noop(self.tokens[self.idx-1].clone()))
-        } else {
-            match self.assignment() {
-                Ok(e) => Ok(e),
-                Err(e) => {self.errors.push(e); self.error_recover(); Ok(Expr::Noop(self.tokens[self.idx].clone()))}
+        let target = punwrap!(self.logic());
+        if let Some(Ok(Token::Equals{..} | Token::AddTo{..} | Token::SubtractFrom{..} | Token::DivideBy{..}| Token::MultiplyBy{..})) = self.lexer.peek() {
+            let operator = self.lexer.next().unwrap().unwrap();
+            if let Expr::Variable(varname) = target {
+                let line = operator.line();
+                let col = operator.col();
+                let value_expr = match operator {
+                    Token::AddTo{..} => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token::Plus{line, col, len:0}, Box::new(punwrap!(self.expression()))),
+                    Token::SubtractFrom{..} => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token::Minus{line, col, len:0}, Box::new(punwrap!(self.expression()))),
+                    Token::MultiplyBy{..} => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token::Star{line, col, len:0}, Box::new(punwrap!(self.expression()))),
+                    Token::DivideBy{..} => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token::Slash{line, col, len:0}, Box::new(punwrap!(self.expression()))),
+                    _ => punwrap!(self.expression()),
+                };
+                Some(Ok(Expr::Assignment(varname, Box::new(value_expr))))
+            } else {
+                Some(Err(target.to_err("Invalid assignment target.")))
             }
+        } else {
+            Some(Ok(target))
         }
     }
-    fn parse_preconditions(&mut self) -> Result<Option<Expr>, Error> {
-        ptest!(self, TokenData::OpenParenthesis, {
-            let preconditions = Some(self.expression()?);
-            pexpect!(self, TokenData::CloseParenthesis, {preconditions}, "Expected ')' after task conditions.")
+    
+    fn expression(&mut self) -> Result<Expr, Error> {
+        if let Some(Ok(token)) = self.lexer.next_if(|t| match t {Ok(Token{t:Pass,..})=>true,_=>false}) {
+            Ok(Expr::Nop(token))
         } else {
-            Ok(None)
-        })
+            self.assignment()
+        }
     }
 
-    fn parse_cost(&mut self) -> Result<Option<i32>, Error> {
-        ptest!(self, TokenData::Cost, {
-            pexpect!(self, TokenData::Literal(Literal::I(cost)), { Some(*cost) }, "Expected integer after cost.")
-        } else { 
+    fn parse_object_path(&mut self) -> Result<Vec<Token>, Error> {
+        let mut name = vec![match self.lexer.next() {
+            Some(Ok(token @ Token{t:Identifier(_),..})) => Ok(token),
+            Some(Ok(token)) => Err(token.to_err("Expected identifier.")),
+            Some(Err(e)) => Err(e),
+            None => Err(Parser::EOF_ERROR),
+        }?];
+        while self.lexer.next_if(|t| match t { Ok(Token{t:Dot,..}) => true, _=>false}).is_some() {
+            name.push(match self.lexer.next() {
+                Some(Ok(token @ Token{t:Identifier(_),..})) => Ok(token),
+                Some(Ok(token)) => Err(token.to_err("Expected identifier.")),
+                Some(Err(e)) => Err(e),
+                None => Err(Parser::EOF_ERROR),
+            }?)
+        }
+        Ok(name)
+    }
+    fn parse_preconditions(&mut self) -> Result<Option<Expr>, Error> {
+        if self.lexer.next_if(|t| match t { Ok(Token{t:OpenParenthesis,..})=>true, _=>false}).is_some() {
+            let preconditions = self.expression()?;
+            match self.lexer.next() {
+                Some(Ok(Token{t:CloseParenthesis,..})) => Ok(Some(preconditions)),
+                Some(Ok(token)) => Err(token.to_err("Expected ')' after preconditions.")),
+                Some(Err(e)) => Err(e),
+                None => Err(Parser::EOF_ERROR),
+            }
+        } else {
             Ok(None)
-        })
+        }
+    }
+
+    fn parse_cost(&mut self) -> Result<Option<Expr>, Error> {
+        if self.lexer.next_if(|t| match t { Ok(Token{t:Cost,..})=>true, _=>false}).is_some() {
+            Ok(Some(self.expression()?))
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_body(&mut self) -> Result<Stmt, Error> {
-        pexpect!(self, TokenData::Colon, {self.statement()?}, "Expected ':'")
+        match self.lexer.next() {
+            Some(Ok(Token{t:Colon,..})) => Ok(self.statement()?),
+            Some(Ok(token)) => Err(token.to_err("Expected ':'.")),
+            Some(Err(e)) => Err(e),
+            None => Err(Parser::EOF_ERROR),
+        }
+    }
+    fn parse_binding(&mut self) -> Result<Option<(&str, &str)>, Error> {
+        if let Some(Ok(for_token)) = self.lexer.next_if(|t| match t { Ok(Token{t:For,..})=>true, _=>false}) {
+            let class = match self.lexer.next() {
+                Some(Ok(Token{t:Identifier(class),..})) => Ok(class),
+                Some(Ok(token)) => Err(token.to_err("Expected identifier.")),
+                Some(Err(e)) => Err(e),
+                None => Err(Parser::EOF_ERROR),
+            }?;
+            let variable = if self.lexer.next_if(|t| match t { Ok(Token{t:On,..})=>true,_=>false}).is_some() {
+                match self.lexer.next() {
+                    Some(Ok(Token{t:Identifier(variable),..})) => Ok(variable),
+                    Some(Ok(token)) => Err(token.to_err("Expected identifier.")),
+                    Some(Err(e)) => Err(e),
+                    None => Err(Parser::EOF_ERROR),
+                }
+            } else {
+                Err(for_token.to_err("Expected 'on' after class identifier."))
+            }?;
+            Ok(Some((class, variable)))
+        } else {
+            Ok(None)
+        }
     }
 
     fn task_statement(&mut self) -> Result<Stmt, Error> {
-        // let token_id = self.idx-1;
-        pexpect!(self, TokenData::Label(_), {
-            let name: Token = self.tokens[self.idx-1].clone();
-            let preconditions = self.parse_preconditions()?; 
-            let binding = ptest!(self, TokenData::On, {
-                let class_type = pexpect!(self, TokenData::Label(s), {s}, "Expected label after on.")?.clone();
-                pexpect!(self, TokenData::As, {()}, "Expected 'as'.")?;
-                let variable_name = pexpect!(self, TokenData::Label(s), {s}, "Exptected label after as.")?.clone();
-                Ok(Some(Binding{class_type, variable_name}))      
-            } else { Ok(None) })?;
+        let name = self.parse_object_path()?;
+        if let Some(Ok(Token{t:StatementEnd,..})) = self.lexer.peek() {
+            Ok(Stmt::TaskDeclaration{name})
+        } else {
+            let binding = self.parse_binding()?;
+            let preconditions = self.parse_preconditions()?;
             let cost = self.parse_cost()?;
             let body = Box::new(self.parse_body()?);
-            let effects = ptest!(self, TokenData::Effects, {Ok(Some(Box::new(self.parse_body()?)))} else {Ok(None)})?;
-            Stmt::Task{name, preconditions, cost, body, binding, effects}
-        }, "Expected label after 'task'.")
-        
+            let effects = if self.lexer.next_if(|t| match t { Ok(Token{t:Effects,..})=>true,_=>false}).is_some() {
+                Some(Box::new(self.parse_body()?))
+            } else {
+                None
+            };
+            let planning = if self.lexer.next_if(|t| match t { Ok(Token{t:Planning,..})=>true,_=>false}).is_some() {
+                Some(Box::new(self.parse_body()?))
+            } else {
+                None
+            };
+            Ok(Stmt::Task{name, preconditions, cost, body, binding, effects, planning})
+        }
     }
+        
     fn expression_statement(&mut self) -> Result<Stmt, Error> {
         let expr = self.expression()?;
-        pexpect!(self, TokenData::StatementEnd | TokenData::BlockStart | TokenData::BlockEnd, 
-            {Stmt::Expression(expr)}, 
-            "Expected new line after expression.")
+        if self.lexer.next_if(|t| match t { Ok(Token{t:StatementEnd,..}) => true, _ => false } ).is_some() {
+            Ok(Stmt::Expression(expr))
+        } else {
+            Err(expr.to_err("Expected new line after expression."))
+        }
     }
     fn block_statement(&mut self) -> Result<Stmt, Error> {
         let mut stmts = Vec::<Stmt>::new();
         loop {
-            let stmt = self.statement();
-            match stmt {
-                Ok(stmt) => if let Stmt::Block(inner) = stmt {
-                    stmts.extend(inner);
-                } else {
-                    stmts.push(stmt);
-                },
-                Err(e) => {self.errors.push(e); self.error_recover()}
-            }
-            
-
-            if let TokenData::BlockEnd | TokenData::EOF = self.tokens[self.idx].t {
-                self.idx += 1;
-                return Ok(Stmt::Block(stmts))
+            stmts.push(self.statement()?);
+            if self.lexer.next_if(|t| match t { Ok(Token{t:BlockEnd,..}) => true, _ => false }).is_some() {
+                break Ok(Stmt::Block(stmts))
             } 
         }
         
     }
-    fn method_statement(&mut self) -> Result<Stmt, Error> {
-        pexpect!(self, TokenData::Label(_), {
-            let name: Token = self.tokens[self.idx-1].clone();
-            let preconditions = self.parse_preconditions()?;
-            let cost = self.parse_cost()?;
-            let body = Box::new(self.parse_body()?);
-            let mut else_cost = None;
-            let else_body = ptest!(self, TokenData::Else, {
-                else_cost = self.parse_cost()?;
-                Ok(Some(Box::new(self.parse_body()?)))
-            } else {
-                Ok(None)
-            })?;
-            Stmt::Method{name, preconditions, cost, body, else_cost, else_body}
-        }, "Expected method name.")
-    }
     fn include_statement(&mut self) -> Result<Stmt, Error> {
-        let t = self.tokens[self.idx].clone();
-        self.idx += 1;
-        pexpect!(self, TokenData::StatementEnd, {Stmt::Include(t)}, "Expected new line after expression.")
+        let target = match self.lexer.next() {
+            Some(Ok(token @ Token{t:Literal(S(src)),..})) => Ok(token),
+            Some(Ok(token)) => Err(token.to_err("Expected string literal.")),
+            Some(Err(e)) => Err(e),
+            None => Err(Parser::EOF_ERROR),
+        }?;
+        if self.lexer.next_if(|t| match t { Ok(Token{t:StatementEnd,..}) => true, _ => false}).is_some() {
+            Ok(Stmt::Include(target))
+        } else {
+            Err(target.to_err("Expected new line after expression."))
+        }
     }
     fn type_statement(&mut self) -> Result<Stmt, Error> {
-        pexpect!(self, TokenData::Label(_), {
-            let name: Token = self.tokens[self.idx-1].clone();
-            let body = Box::new(self.parse_body()?);
-            Stmt::Type{name, body}
-        }, "Expected type name.")
+        let name = match self.lexer.next() {
+            Some(Ok(token @ Token{t:Identifier(_),..})) => Ok(token),
+            Some(Ok(token)) => Err(token.to_err("Expected type name.")),
+            Some(Err(e)) => Err(e),
+            None => Err(Parser::EOF_ERROR),
+        }?;
+        let body = Box::new(self.parse_body()?);
+        Ok(Stmt::Type{name, body})
     }
+
     fn statement(&mut self)-> Result<Stmt, Error> {
-        // println!("When Parsing a new statement, next token is {}.", self.tokens[self.idx]);
-        let r = if let TokenData::Task = self.tokens[self.idx].t {
-            self.idx += 1;
-            self.task_statement()
-        } else if let TokenData::BlockStart = self.tokens[self.idx].t {
-            self.idx += 1;
-            self.block_statement()
-        } else if let TokenData::Method = self.tokens[self.idx].t {
-            self.idx += 1;
-            self.method_statement()
-        } else if let TokenData::Type = self.tokens[self.idx].t {
-            self.idx += 1;
-            self.type_statement()
-        } else if let TokenData::Include = self.tokens[self.idx].t {
-            self.idx += 1;
-            self.include_statement()
-        } else if let TokenData::EOF = self.tokens[self.idx].t {
-            Err(self.tokens[self.idx].to_err("Reached the end of file"))
-        } else {
-            self.expression_statement()
-        };
-        // println!("After parsing a statement, next token is {}.", self.tokens[self.idx]);
-        r
-    }
-    fn _print_tokens(tokens: &Vec<Token>) {
-        let mut depth = 0;
-        println!("{}", tokens.iter().fold(String::new(), |acc, item| {
-                let item_string = match item.t {
-                    TokenData::BlockStart => {depth += 1; format!("{:?}", item.t)},
-                    TokenData::BlockEnd => {format!("{:?}\n", item.t)},
-                    TokenData::Colon => format!("{:?}\n", item.t),
-                    _ => format!("{:?} ", item.t),
-                };
-                let r = if acc.ends_with('\n') || acc.len() == 0 {
-                    acc + &format!("{:4}: {:width$}{}", item.line, ' ', item_string, width=depth*4)
-                } else if acc.ends_with('{') {
-                    acc + &format!(" {}", item_string)
-                } else {
-                    acc + &format!("{}", item_string)
-                };
-                if let TokenData::BlockEnd = item.t {
-                    depth -= 1;
-                };
-                r
-            }
-        ));
-    }
-    pub fn parse(htn_source: &str) -> Result<Vec<Stmt>, Vec<Error>> {
-        let mut parser = match Lexer::tokenize(htn_source) {
-            Ok(tokens) => Parser{idx:0, tokens, ast:Vec::new(), errors:Vec::new()},
-            Err(e) => { return Err(vec![e]); }
-        };
-        // Parser::_print_tokens(&parser.tokens);
-        while parser.idx + 1 < parser.tokens.len() {
-            match parser.statement() {
-                Ok(s) => parser.ast.push(s),
-                Err(e) => {parser.errors.push(e); parser.error_recover()}
-            }
+        let stmt = match self.lexer.next() {
+            Some(Ok(Token{t:Task,..})) => self.task_statement(),
+            Some(Ok(Token{t:BlockStart,..})) => self.block_statement(),
+            Some(Ok(Token{t:Type,..})) => self.type_statement(),
+            Some(Ok(Token{t:Include,..})) => self.include_statement(),
+            Some(Err(e)) => Err(e),
+            None => Err(Parser::EOF_ERROR),
+            _ => self.expression_statement()
+        }?;
+        match self.lexer.next() {
+            Some(Ok(Token{t:StatementEnd,..})) => Ok(stmt),
+            Some(Ok(token)) => Err(token.to_err("Expected new line after statement.")),
+            Some(Err(e)) => Err(e),
+            None => Err(Parser::EOF_ERROR),
         }
-        if parser.errors.len() > 0 {
-            Err(parser.errors)
-        } else {
-            Ok(parser.ast)
-        }
+    }
+}
+
+impl<'a> Parser<'a> {
+    pub fn new(code:&'a str) -> Self {
+        let lexer = Lexer::new(code).peekable();
+        Self{lexer}
     }
 }

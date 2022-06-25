@@ -1,15 +1,15 @@
 use super::Error;
-use std::fmt;
+use std::{fmt, ops::Deref};
 
-#[derive(Clone, Debug)]
-pub enum Literal {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Literal<'a> {
     I(i32),
     F(f32),
     B(bool),
-    S(String)
+    S(&'a str)
 }
 
-impl fmt::Display for Literal {
+impl fmt::Display for Literal<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Literal::*;
         match self {
@@ -21,21 +21,21 @@ impl fmt::Display for Literal {
     }
 }
 
-
-#[derive(Debug, Clone)]
-pub enum TokenData {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TokenData<'a> {
     Task,
     Method,
     Else,
     Effects,
+    Planning,
     Cost,
     Pass,
-    On,
+    For,
     As,
     Dot,
     Type,
-    Label(String),
-    Literal(Literal),
+    Identifier(&'a str),
+    Literal(Literal<'a>),
     Include,
     Comma,
     Equals,
@@ -62,24 +62,17 @@ pub enum TokenData {
     BlockStart,
     BlockEnd,
     StatementEnd,
-    EOF
 }
 
-#[derive(Clone, Debug)]
-pub struct Token {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Token<'a> {
     pub line: usize,
     pub col: usize,
     pub len: usize,
-    pub t: TokenData,
+    pub t: TokenData<'a>
 }
 
-impl fmt::Display for Token {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.t)
-    }
-}
-
-impl fmt::Display for TokenData {
+impl fmt::Display for TokenData<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TokenData::*;
         match self {
@@ -90,12 +83,13 @@ impl fmt::Display for TokenData {
             Pass => write!(f, "PASS"),
             Cost => write!(f, "COST"),
             Include => write!(f, "INCLUDE"),
-            On => write!(f, "ON"),
+            Planning => write!(f, "PLANNING"),
+            For => write!(f, "FOR"),
             As => write!(f, "AS"),
             Type => write!(f, "TYPE"),
             Dot => write!(f, "."),
-            Label(l) => write!(f, "{}", l),
-            Literal(l) => write!(f, "'{}'", l),
+            Identifier(label) => write!(f, "{}", label),
+            Literal(literal) => write!(f, "{}", literal),
             Comma => write!(f, ","),
             Equals => write!(f, "="),
             EqualsEquals => write!(f, "=="),
@@ -121,13 +115,33 @@ impl fmt::Display for TokenData {
             BlockStart => write!(f, "{{"),
             BlockEnd => write!(f, "}}"),
             StatementEnd => write!(f, ";"),
-            EOF => write!(f, "<<EOF"),
         }
     }
 }
 
-impl Token {
-    pub fn to_err(&self, msg:&str) -> Error {
-        Error { line: self.line, col: self.col, message: String::from(msg) }
+impl std::fmt::Display for Token<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.t.fmt(f)
     }
+}
+
+impl Token<'_> {
+    pub fn to_err(&self, msg:&str) -> Error {
+        Error{line:self.line, col:self.col, message: String::from(msg) }
+    }
+
+    pub fn unwrap_identifier(&self) -> &str {
+        match self.t {
+            TokenData::Identifier(s) => s,
+            _ => panic!("Expected identifier.")
+        }
+    }
+
+    pub fn unwrap_literal(&self) -> Literal {
+        match self.t {
+            TokenData::Literal(l) => l,
+            _ => panic!("Expected literal.")
+        }
+    }
+
 }

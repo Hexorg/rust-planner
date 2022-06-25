@@ -15,7 +15,7 @@ type Peg:
     left
     middle
     right
-
+        
 # id: 0
 task Main(right.bottom == 3 & right.middle == 2 & right.top == 1):
     complete()
