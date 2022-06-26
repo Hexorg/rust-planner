@@ -213,17 +213,21 @@ impl<'a> Parser<'a> {
     fn assignment(&mut self) -> Result<Expr<'a>, Error> {
         let target = self.logic()?;
         if let Some(Ok(operator)) = self.lexer.next_if(|t| match t { Ok(Token{t:Equals | AddTo | SubtractFrom | DivideBy | MultiplyBy,..})=>true,_=>false}) {
-            let target = self.parse_object_path()?;
-            let line = operator.line;
-            let col = operator.col;
-            let value_expr = match operator {
-                Token{t:AddTo,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Plus}, Box::new(self.expression()?)),
-                Token{t:SubtractFrom,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Minus}, Box::new(self.expression()?)),
-                Token{t:MultiplyBy,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Star}, Box::new(self.expression()?)),
-                Token{t:DivideBy,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Slash}, Box::new(self.expression()?)),
-                _ => self.expression()?,
-            };
-            Ok(Expr::Assignment(target, Box::new(value_expr)))
+            // let target = self.parse_object_path()?;
+            if let Expr::Variable(target) = target {
+                let line = operator.line;
+                let col = operator.col;
+                let value_expr = match operator {
+                    Token{t:AddTo,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Plus}, Box::new(self.expression()?)),
+                    Token{t:SubtractFrom,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Minus}, Box::new(self.expression()?)),
+                    Token{t:MultiplyBy,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Star}, Box::new(self.expression()?)),
+                    Token{t:DivideBy,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Slash}, Box::new(self.expression()?)),
+                    _ => self.expression()?,
+                };
+                Ok(Expr::Assignment(target, Box::new(value_expr)))
+            } else {
+                Err(target.to_err("Expected identifier."))
+            }
         } else {
             Ok(target)
         }
@@ -318,22 +322,30 @@ impl<'a> Parser<'a> {
         let _task = self.lexer.next();
         let name = self.parse_object_path()?;
         if let Some(Ok(Token{t:StatementEnd,..})) = self.lexer.peek() {
+            self.lexer.next();
             Ok(Stmt::TaskDeclaration{name})
         } else {
-            let binding = self.parse_binding()?;
-            let preconditions = self.parse_preconditions()?;
-            let cost = self.parse_cost()?;
+            let mut preconditions = None;
+            let mut binding = None;
+            let mut cost = None;
+            loop {
+                match self.lexer.peek() {
+                    Some(Ok(Token{t:OpenParenthesis,..})) => preconditions = self.parse_preconditions()?,
+                    Some(Ok(Token{t:For,..})) => binding = self.parse_binding()?,
+                    Some(Ok(Token{t:Cost,..})) => cost = self.parse_cost()?,
+                    _ => break,
+                }
+            }
             let body = Box::new(self.parse_body()?);
-            let effects = if self.lexer.next_if(|t| match t { Ok(Token{t:Effects,..})=>true,_=>false}).is_some() {
-                Some(Box::new(self.parse_body()?))
-            } else {
-                None
-            };
-            let planning = if self.lexer.next_if(|t| match t { Ok(Token{t:Planning,..})=>true,_=>false}).is_some() {
-                Some(Box::new(self.parse_body()?))
-            } else {
-                None
-            };
+            let mut effects = None;
+            let mut planning = None;
+            loop {
+                match self.lexer.peek() {
+                    Some(Ok(Token{t:Effects,..})) => {self.lexer.next(); effects = Some(Box::new(self.parse_body()?))},
+                    Some(Ok(Token{t:Planning,..})) => {self.lexer.next(); planning = Some(Box::new(self.parse_body()?))},
+                    _ => break,
+                }
+            }
             Ok(Stmt::Task{name, preconditions, cost, body, binding, effects, planning})
         }
     }
@@ -366,7 +378,13 @@ impl<'a> Parser<'a> {
             Some(Err(e)) => Err(e),
             None => Err(self.make_eof_error()),
         }?;
-        Ok(Stmt::Include(target))
+        match self.lexer.next() {
+            Some(Ok(Token{t:StatementEnd,..})) => Ok(Stmt::Include(target)),
+            Some(Ok(token)) => Err(token.to_err("Expected new line after statement.")),
+            Some(Err(e)) => Err(e),
+            None => Err(self.make_eof_error()),
+        }
+        
     }
     fn type_statement(&mut self) -> Result<Stmt<'a>, Error> {
         let _typ = self.lexer.next();
@@ -401,7 +419,7 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::htn::parser::{Parser, Error, statement::Stmt, expression::Expr, tokens::{Token, Literal::*, TokenData::*}};
+    use crate::htn::parser::{Parser, statement::Stmt, expression::Expr, tokens::{Token, Literal::*, TokenData::*}};
 
     #[test]
     fn test_include() {
@@ -418,7 +436,34 @@ mod tests {
             name:Token{line:1, col:6, len:4, t:Identifier("Cell")}, body:Box::new(Stmt::Block(vec![
                 Stmt::Expression(Expr::Variable(vec![Token{line:2, col:2, len:2, t:Identifier("c1")}])),
                 Stmt::Expression(Expr::Variable(vec![Token{line:3, col:2, len:2, t:Identifier("c2")}]))
-                ]))
-            })))
+            ]))
+        })));
+        assert_eq!(parser.next(), None);
+    }
+    #[test]
+    fn test_task_declaration() {
+        let code = "task Main.eat";
+        let mut parser = Parser::new(code);
+        assert_eq!(parser.next(), Some(Ok(Stmt::TaskDeclaration{name:vec![
+            Token{line:1, col:6, len:4, t:Identifier("Main")},
+            Token{line:1, col:11, len:3, t:Identifier("eat")}
+        ]})));
+        assert_eq!(parser.next(), None)
+    }
+
+    #[test]
+    fn test_task() {
+        let code = "task Main.eat (hunger > 5.0) for Pawn on pwn cost 20.0-hunger:\n\top()\neffects:\n\thunger = 0.0\nplanning:\n\tpop()\n\n\n";
+        let mut parser = Parser::new(code);
+        assert_eq!(parser.next(), Some(Ok(Stmt::Task{
+            name: vec![Token{line:1, col:6, len:4, t:Identifier("Main")},Token{line:1, col:11, len:3, t:Identifier("eat")}], 
+            preconditions: Some(Expr::Binary(Box::new(Expr::Variable(vec![Token{line:1, col:16, len:6, t:Identifier("hunger")}])), Token{line:1, col:23, len:1, t:Greater}, Box::new(Expr::Literal(Token{line:1, col:25, len:3, t:Literal(F(5.0))})))), 
+            cost: Some(Expr::Binary(Box::new(Expr::Literal(Token{line:1, col:51, len:4, t:Literal(F(20.0))})), Token{line:1, col:55, len:1, t:Minus}, Box::new(Expr::Variable(vec![Token{line:1, col:56, len:6, t:Identifier("hunger")}])))), 
+            binding: Some(("Pawn", "pwn")), 
+            body: Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:2, col:2, len:2, t:Identifier("op")}, Vec::new()))])), 
+            effects: Some(Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Assignment(vec![Token{line:4, col:2, len:6, t:Identifier("hunger")}], Box::new(Expr::Literal(Token{line:4, col:11, len:3, t:Literal(F(0.0))}))))]))), 
+            planning: Some(Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:6, col:2, len:3, t:Identifier("pop")}, Vec::new()))])))
+        })));
+        assert_eq!(parser.next(), None);
     }
 }

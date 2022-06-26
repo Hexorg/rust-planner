@@ -194,7 +194,7 @@ impl<'a> Lexer<'a> {
         let slice = if let Some((identifier_end,_)) = self.it.peek() { &self.text[offset..*identifier_end]} else { &self.text[offset..]};
         let token = match slice {
             "task" => Ok(Token{line:self.line, col:self.col, len, t:Task}),
-            "method" => Ok(Token{line:self.line, col:self.col, len, t:Method}),
+            "planning" => Ok(Token{line:self.line, col:self.col, len, t:Planning}),
             "else" => Ok(Token{line:self.line, col:self.col, len, t:Else}),
             "effects" => Ok(Token{line:self.line, col:self.col, len, t:Effects}),
             "include" => Ok(Token{line:self.line, col:self.col, len, t:Include}),

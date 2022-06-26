@@ -24,7 +24,6 @@ impl fmt::Display for Literal<'_> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TokenData<'a> {
     Task,
-    Method,
     Else,
     Effects,
     Planning,
