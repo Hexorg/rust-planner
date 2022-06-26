@@ -13,6 +13,7 @@ pub trait ExpressionVisitor<T, E> {
     fn visit_nop_expr(&mut self, token: &Token) -> Result<T, E>;
 }
 
+#[derive(PartialEq)]
 pub enum Expr<'a> {
     Binary(Box<Expr<'a>>, Token<'a>, Box<Expr<'a>>), // left Token right
     Grouping(Box<Expr<'a>>, Token<'a>), // e.g. '(' expression ')'

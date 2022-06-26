@@ -94,13 +94,13 @@ impl<'a> Iterator for Lexer<'a> {
                                 // self block will push on the stack if they are needed.
                                 // pull either the needed block start or the next token
                                 // and pass it down
-                                self.next()
+                                return self.next() // need to return because self.next() already added next token's length to self.col
                             }  
                         } else { 
                             // whitespace in the middle of a line. It's not a token, 
                             // So self.col += token.len() won't count. Therefore col should be incremented
                             self.col += 1;
-                            self.next() 
+                            return self.next() // need to return because self.next() already added next token's length to self.col
                         },
                     c if (c.is_alphabetic() || c == '_') => Some(self.identifier(offset)),
                     c if c.is_digit(10) => Some(self.number(offset)),
@@ -138,7 +138,12 @@ impl<'a> Iterator for Lexer<'a> {
 
                 new_token
             } else {
-                None
+                if self.tab_depth > 0 {
+                    self.tab_depth -= 1;
+                    Some(Ok(Token{line:self.line, col:self.col, len:0, t:BlockEnd}))
+                } else {
+                    None
+                }
             }
         }
     }
@@ -232,13 +237,14 @@ impl<'a> Lexer<'a> {
             self.depth_separator = Some(DepthSeparator::TABS);
         }
         if let Some(DepthSeparator::TABS) = self.depth_separator {
-            if self.tab_depth < count {
+            if self.tab_depth <= count {
                 self.col += self.tab_depth;
             } else if self.tab_depth > count {
                 self.col += count;
             }
             while self.tab_depth < count {
                 self.stash.push(Token{line:self.line, col:self.col, len:1, t:BlockStart});
+                self.col += 1;
                 self.tab_depth += 1;
             }
             while self.tab_depth > count {
@@ -259,13 +265,14 @@ impl<'a> Lexer<'a> {
                 return Some(Error{line:self.line, col:self.col, message:format!("Extra spaces. Expected {}.", one_depth)})
             }
             let count = count / one_depth;
-            if self.tab_depth < count {
+            if self.tab_depth <= count {
                 self.col += self.tab_depth*one_depth;
             } else if self.tab_depth > count {
                 self.col += count*one_depth;
             }
             while self.tab_depth < count {
                 self.stash.push(Token{line:self.line, col:self.col, len:one_depth, t:BlockStart});
+                self.col += one_depth;
                 self.tab_depth += 1;
             }
             while self.tab_depth > count {
@@ -354,6 +361,50 @@ mod tests {
         assert_eq!(l.next(), Some(Err(Error{line:2, col:1, message:"Expected spaces at the beginning of the line.".to_owned()})));
         assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:1, t:And})));
         assert_eq!(l.next(), Some(Ok(Token{line:2, col:3, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:3, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), None);
+    }
+
+    #[test]
+    fn test_double_block_end() {
+        let code = "task Test:\n\ttask M1:\n\t\top()\ntask Two";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:4, t:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:6, len:4, t:Identifier("Test")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:10, len:1, t:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:11, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:1, len:1, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:4, t:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:7, len:2, t:Identifier("M1")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:9, len:1, t:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:10, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:2, len:1, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:3, len:2, t:Identifier("op")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:5, len:1, t:OpenParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:6, len:1, t:CloseParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:7, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:0, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:0, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:1, len:4, t:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:6, len:3, t:Identifier("Two")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:9, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), None);
+    }
+
+    #[test]
+    fn test_type() {
+        let code = "type Cell:\n\tc1\n\tc2";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:4, t:Type})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:6, len:4, t:Identifier("Cell")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:10, len:1, t:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:11, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:1, len:1, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:2, t:Identifier("c1")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:4, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:2, len:2, t:Identifier("c2")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:4, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:4, len:0, t:BlockEnd})));
         assert_eq!(l.next(), None);
     }
 }

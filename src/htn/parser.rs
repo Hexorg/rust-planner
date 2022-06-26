@@ -95,7 +95,6 @@ impl<'a> Iterator for Parser<'a> {
 
 
 impl<'a> Parser<'a> {
-    const EOF_ERROR:Error = Error{line:0, col:0, message:String::from("Unexpected end of file.")};
     // fn error_recover(&mut self) {
     //     self.idx += 1;
     //     while self.idx + 1 < self.tokens.len() {
@@ -109,6 +108,9 @@ impl<'a> Parser<'a> {
     //         self.idx += 1;
     //     }
     // }
+    fn make_eof_error(&self) -> Error {
+        Error{line:0, col:0, message:"Unexpected end of file.".to_owned()}
+    }
     fn primary(&mut self) -> Result<Expr<'a>, Error> {
         // Literal | Label | "(" expression ")"
         match self.lexer.peek() {
@@ -125,7 +127,7 @@ impl<'a> Parser<'a> {
             },
             Some(Ok(token)) => Err(token.to_err("Expected expression.")),
             Some(Err(e)) => Err(self.lexer.next().unwrap().unwrap_err()),
-            None => Err(Parser::EOF_ERROR),
+            None => Err(self.make_eof_error()),
         }
     }
 
@@ -145,7 +147,7 @@ impl<'a> Parser<'a> {
                             Some(Ok(Token{t:Comma,..})) => (),
                             Some(Ok(token)) => return Err(token.to_err("Expected ','.")),
                             Some(Err(e)) => return Err(e),
-                            None => return Err(Parser::EOF_ERROR),
+                            None => return Err(self.make_eof_error()),
                         }
                     }
                     Ok(Expr::Call(name[0], args))
@@ -240,14 +242,14 @@ impl<'a> Parser<'a> {
             Some(Ok(token @ Token{t:Identifier(_),..})) => Ok(token),
             Some(Ok(token)) => Err(token.to_err("Expected identifier.")),
             Some(Err(e)) => Err(e),
-            None => Err(Parser::EOF_ERROR),
+            None => Err(self.make_eof_error()),
         }?];
         while self.lexer.next_if(|t| match t { Ok(Token{t:Dot,..}) => true, _=>false}).is_some() {
             name.push(match self.lexer.next() {
                 Some(Ok(token @ Token{t:Identifier(_),..})) => Ok(token),
                 Some(Ok(token)) => Err(token.to_err("Expected identifier.")),
                 Some(Err(e)) => Err(e),
-                None => Err(Parser::EOF_ERROR),
+                None => Err(self.make_eof_error()),
             }?)
         }
         Ok(name)
@@ -259,7 +261,7 @@ impl<'a> Parser<'a> {
                 Some(Ok(Token{t:CloseParenthesis,..})) => Ok(Some(preconditions)),
                 Some(Ok(token)) => Err(token.to_err("Expected ')' after preconditions.")),
                 Some(Err(e)) => Err(e),
-                None => Err(Parser::EOF_ERROR),
+                None => Err(self.make_eof_error()),
             }
         } else {
             Ok(None)
@@ -276,10 +278,16 @@ impl<'a> Parser<'a> {
 
     fn parse_body(&mut self) -> Result<Stmt<'a>, Error> {
         match self.lexer.next() {
-            Some(Ok(Token{t:Colon,..})) => Ok(self.statement()?),
+            Some(Ok(Token{t:Colon,..})) =>
+                match self.lexer.next() {
+                    Some(Ok(Token{t:StatementEnd,..})) => Ok(self.statement()?),
+                    Some(Ok(token)) => Err(token.to_err("Expected new line after ':'.")),
+                    Some(Err(e)) => Err(e),
+                    None => Err(self.make_eof_error()),
+                },
             Some(Ok(token)) => Err(token.to_err("Expected ':'.")),
             Some(Err(e)) => Err(e),
-            None => Err(Parser::EOF_ERROR),
+            None => Err(self.make_eof_error()),
         }
     }
     fn parse_binding(&mut self) -> Result<Option<(&'a str, &'a str)>, Error> {
@@ -288,14 +296,14 @@ impl<'a> Parser<'a> {
                 Some(Ok(Token{t:Identifier(class),..})) => Ok(class),
                 Some(Ok(token)) => Err(token.to_err("Expected identifier.")),
                 Some(Err(e)) => Err(e),
-                None => Err(Parser::EOF_ERROR),
+                None => Err(self.make_eof_error()),
             }?;
             let variable = if self.lexer.next_if(|t| match t { Ok(Token{t:On,..})=>true,_=>false}).is_some() {
                 match self.lexer.next() {
                     Some(Ok(Token{t:Identifier(variable),..})) => Ok(variable),
                     Some(Ok(token)) => Err(token.to_err("Expected identifier.")),
                     Some(Err(e)) => Err(e),
-                    None => Err(Parser::EOF_ERROR),
+                    None => Err(self.make_eof_error()),
                 }
             } else {
                 Err(for_token.to_err("Expected 'on' after class identifier."))
@@ -307,6 +315,7 @@ impl<'a> Parser<'a> {
     }
 
     fn task_statement(&mut self) -> Result<Stmt<'a>, Error> {
+        let _task = self.lexer.next();
         let name = self.parse_object_path()?;
         if let Some(Ok(Token{t:StatementEnd,..})) = self.lexer.peek() {
             Ok(Stmt::TaskDeclaration{name})
@@ -330,14 +339,16 @@ impl<'a> Parser<'a> {
     }
         
     fn expression_statement(&mut self) -> Result<Stmt<'a>, Error> {
-        let expr = self.expression()?;
-        if self.lexer.next_if(|t| match t { Ok(Token{t:StatementEnd,..}) => true, _ => false } ).is_some() {
-            Ok(Stmt::Expression(expr))
-        } else {
-            Err(expr.to_err("Expected new line after expression."))
+        let stmt = Stmt::Expression(self.expression()?);
+        match self.lexer.next() {
+            Some(Ok(Token{t:StatementEnd,..})) => Ok(stmt),
+            Some(Ok(token)) => Err(token.to_err("Expected new line after statement.")),
+            Some(Err(e)) => Err(e),
+            None => Err(self.make_eof_error()),
         }
     }
     fn block_statement(&mut self) -> Result<Stmt<'a>, Error> {
+        let _blk = self.lexer.next();
         let mut stmts = Vec::<Stmt>::new();
         loop {
             stmts.push(self.statement()?);
@@ -348,49 +359,66 @@ impl<'a> Parser<'a> {
         
     }
     fn include_statement(&mut self) -> Result<Stmt<'a>, Error> {
+        let _inc = self.lexer.next();
         let target = match self.lexer.next() {
-            Some(Ok(token @ Token{t:Literal(S(src)),..})) => Ok(token),
+            Some(Ok(token @ Token{t:Literal(S(_)),..})) => Ok(token),
             Some(Ok(token)) => Err(token.to_err("Expected string literal.")),
             Some(Err(e)) => Err(e),
-            None => Err(Parser::EOF_ERROR),
+            None => Err(self.make_eof_error()),
         }?;
-        if self.lexer.next_if(|t| match t { Ok(Token{t:StatementEnd,..}) => true, _ => false}).is_some() {
-            Ok(Stmt::Include(target))
-        } else {
-            Err(target.to_err("Expected new line after expression."))
-        }
+        Ok(Stmt::Include(target))
     }
     fn type_statement(&mut self) -> Result<Stmt<'a>, Error> {
+        let _typ = self.lexer.next();
         let name = match self.lexer.next() {
             Some(Ok(token @ Token{t:Identifier(_),..})) => Ok(token),
             Some(Ok(token)) => Err(token.to_err("Expected type name.")),
             Some(Err(e)) => Err(e),
-            None => Err(Parser::EOF_ERROR),
+            None => Err(self.make_eof_error()),
         }?;
         let body = Box::new(self.parse_body()?);
         Ok(Stmt::Type{name, body})
     }
 
     fn statement(&mut self)-> Result<Stmt<'a>, Error> {
-        let stmt = match self.lexer.next() {
+        match self.lexer.peek() {
             Some(Ok(Token{t:Task,..})) => self.task_statement(),
             Some(Ok(Token{t:BlockStart,..})) => self.block_statement(),
             Some(Ok(Token{t:Type,..})) => self.type_statement(),
             Some(Ok(Token{t:Include,..})) => self.include_statement(),
-            Some(Err(e)) => Err(e),
-            None => Err(Parser::EOF_ERROR),
+            Some(Err(_)) => Err(self.lexer.next().unwrap().unwrap_err()),
+            None => Err(self.make_eof_error()),
             _ => self.expression_statement()
-        }?;
-        match self.lexer.next() {
-            Some(Ok(Token{t:StatementEnd,..})) => Ok(stmt),
-            Some(Ok(token)) => Err(token.to_err("Expected new line after statement.")),
-            Some(Err(e)) => Err(e),
-            None => Err(Parser::EOF_ERROR),
         }
+
     }
 
     pub fn new(code:&'a str) -> Self {
         let lexer = Lexer::<'a>::new(code).peekable();
         Self{lexer}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::htn::parser::{Parser, Error, statement::Stmt, expression::Expr, tokens::{Token, Literal::*, TokenData::*}};
+
+    #[test]
+    fn test_include() {
+        let code = "include \"src\"";
+        let mut parser = Parser::new(code);
+        assert_eq!(parser.next(), Some(Ok(Stmt::Include(Token{line:1, col:10, len:3, t:Literal(S("src"))}))));
+        assert_eq!(parser.next(), None);
+    }
+    #[test]
+    fn test_type() {
+        let code = "type Cell:\n\tc1\n\tc2";
+        let mut parser = Parser::new(code);
+        assert_eq!(parser.next(), Some(Ok(Stmt::Type {
+            name:Token{line:1, col:6, len:4, t:Identifier("Cell")}, body:Box::new(Stmt::Block(vec![
+                Stmt::Expression(Expr::Variable(vec![Token{line:2, col:2, len:2, t:Identifier("c1")}])),
+                Stmt::Expression(Expr::Variable(vec![Token{line:3, col:2, len:2, t:Identifier("c2")}]))
+                ]))
+            })))
     }
 }

@@ -12,6 +12,8 @@ pub trait StatementVisitor<T, E> {
     fn visit_type(&mut self, class:&Token, body:&Stmt) -> Result<T, E>;
 }
 
+
+#[derive(Debug, PartialEq)]
 pub enum Stmt<'a> {
     TaskDeclaration{
         name:Vec<Token<'a>>,
