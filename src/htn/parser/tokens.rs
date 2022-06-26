@@ -9,6 +9,16 @@ pub enum Literal<'a> {
     S(&'a str)
 }
 
+impl Literal<'_> {
+    pub fn unwrap_str(&self) -> &str {
+        match self {
+            Self::S(s) => s,
+            _ => panic!(),
+        }
+    }
+}
+
+
 impl fmt::Display for Literal<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Literal::*;

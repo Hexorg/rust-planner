@@ -50,64 +50,12 @@ impl<'a> Iterator for Parser<'a> {
     }
 }
 
-// macro_rules! punwrap {
-//     ($s:expr) => {
-//         match $s {
-//             None => return Err(Error{line:0, col:0, message:String::from("Unexpected end of file.")}),
-//             Some(Err(e)) => return Err(e),
-//             Some(Ok(r)) => r,
-//         }
-//     }
-// }
-
-
-// macro_rules! pexpect {
-//     ($s:expr, $($p:pat)|+, $do:block, $e:literal) => {
-//         match $s.lexer.peek() {
-//             $($p)|+ => {$s.lexer.next(); $do}
-//             Some(Err(e)) => return Err(Error{line:e.line, col:e.col, message:String::from($e)}),
-//             None => return Err(Error{line:0, col:0, message:String::from("Unexpected end of file.")+$e}),
-//             Some(Ok(t)) => return Err(t.to_err($e))
-//         }
-//     }
-// }
-
-
-// macro_rules! pmatch {
-//     ($s:expr, $p:pat, $do:block) => {
-//         if let $p = &$s.tokens[$s.idx].t {
-//             $s.idx += 1;
-//             $do
-//         } 
-//     }
-// }
-
-// macro_rules! ptest {
-//     ($s:expr, $($p:pat)|+, $do_match:block else $do_nomatch:block) => {
-//             if let $($p)|+ = &$s.tokens[$s.idx].t {
-//                 $s.idx += 1;
-//                 $do_match
-//             } else {
-//                 $do_nomatch
-//             }
-//     }
-// }
-
-
 impl<'a> Parser<'a> {
-    // fn error_recover(&mut self) {
-    //     self.idx += 1;
-    //     while self.idx + 1 < self.tokens.len() {
-    //         if let Token::Task{..} | Token::Method{..} | Token::CloseParenthesis{..}  = self.tokens[self.idx].t {
-    //             return;
-    //         }
-    //         if let Token::StatementEnd{..} = self.tokens[self.idx].t {
-    //             self.idx += 1;
-    //             return;
-    //         }
-    //         self.idx += 1;
-    //     }
-    // }
+    fn error_recover(&mut self) {
+        loop {
+            self.lexer.next_if(|t| match t {Ok(Token{t:Task,..})=>false,_=>true});
+        }
+    }
     fn make_eof_error(&self) -> Error {
         Error{line:0, col:0, message:"Unexpected end of file.".to_owned()}
     }
@@ -419,7 +367,7 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::htn::parser::{Parser, statement::Stmt, expression::Expr, tokens::{Token, Literal::*, TokenData::*}};
+    use crate::htn::parser::{Parser, Error, statement::Stmt, expression::Expr, tokens::{Token, Literal::*, TokenData::*}};
 
     #[test]
     fn test_include() {
@@ -455,6 +403,23 @@ mod tests {
     fn test_task() {
         let code = "task Main.eat (hunger > 5.0) for Pawn on pwn cost 20.0-hunger:\n\top()\neffects:\n\thunger = 0.0\nplanning:\n\tpop()\n\n\n";
         let mut parser = Parser::new(code);
+        assert_eq!(parser.next(), Some(Ok(Stmt::Task{
+            name: vec![Token{line:1, col:6, len:4, t:Identifier("Main")},Token{line:1, col:11, len:3, t:Identifier("eat")}], 
+            preconditions: Some(Expr::Binary(Box::new(Expr::Variable(vec![Token{line:1, col:16, len:6, t:Identifier("hunger")}])), Token{line:1, col:23, len:1, t:Greater}, Box::new(Expr::Literal(Token{line:1, col:25, len:3, t:Literal(F(5.0))})))), 
+            cost: Some(Expr::Binary(Box::new(Expr::Literal(Token{line:1, col:51, len:4, t:Literal(F(20.0))})), Token{line:1, col:55, len:1, t:Minus}, Box::new(Expr::Variable(vec![Token{line:1, col:56, len:6, t:Identifier("hunger")}])))), 
+            binding: Some(("Pawn", "pwn")), 
+            body: Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:2, col:2, len:2, t:Identifier("op")}, Vec::new()))])), 
+            effects: Some(Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Assignment(vec![Token{line:4, col:2, len:6, t:Identifier("hunger")}], Box::new(Expr::Literal(Token{line:4, col:11, len:3, t:Literal(F(0.0))}))))]))), 
+            planning: Some(Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:6, col:2, len:3, t:Identifier("pop")}, Vec::new()))])))
+        })));
+        assert_eq!(parser.next(), None);
+    }
+    #[test]
+    fn test_error_recover() {
+        let code = "task Wait():\ntask Main.eat (hunger > 5.0) for Pawn on pwn cost 20.0-hunger:\n\top()\neffects:\n\thunger = 0.0\nplanning:\n\tpop()\n\n\n";
+        let mut parser = Parser::new(code);
+        assert_eq!(parser.next(), Some(Err(Error{line:1, col:11, message:String::from("Expected expression.")})));
+        parser.error_recover();
         assert_eq!(parser.next(), Some(Ok(Stmt::Task{
             name: vec![Token{line:1, col:6, len:4, t:Identifier("Main")},Token{line:1, col:11, len:3, t:Identifier("eat")}], 
             preconditions: Some(Expr::Binary(Box::new(Expr::Variable(vec![Token{line:1, col:16, len:6, t:Identifier("hunger")}])), Token{line:1, col:23, len:1, t:Greater}, Box::new(Expr::Literal(Token{line:1, col:25, len:3, t:Literal(F(5.0))})))), 

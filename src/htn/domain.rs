@@ -5,19 +5,9 @@ use std::{fs, fmt::Debug,  collections::HashMap};
 use super::optimization::{self, Inertia};
 use super::parser::expression::ExpressionVisitor;
 use super::parser::statement::StatementVisitor;
-use super::parser::{Parser, statement::{Stmt, Binding}, tokens::{self, Token, TokenData}, expression::Expr};
+use super::parser::{Parser, statement::Stmt, tokens::{self, Token, TokenData}, expression::Expr};
 use super::parser;
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub enum OperandType {
-    I(i32),
-    F(f32),
-    B(bool)
-}
-
-impl std::cmp::Eq for OperandType {
-
-}
 
 pub enum NeighborDetectionAlgorithm {
     Inertia,
@@ -47,71 +37,7 @@ impl DomainConfig {
 
 }
 
-impl OperandType {
-    #[inline]
-    pub fn is_true(&self) -> bool {
-        match self {
-            Self::I(i) => *i == 1,
-            Self::B(b) => *b,
-            Self::F(_) => false
-        }
-    }
-}
 
-impl Default for OperandType {
-    fn default() -> Self {
-        Self::I(0)
-    }
-}
-
-impl std::hash::Hash for OperandType {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            OperandType::I(i) => i.hash(state),
-            OperandType::F(f) => f.to_bits().hash(state),
-            OperandType::B(b) => b.hash(state),
-        }
-    }
-}
-
-impl std::convert::TryFrom<&Token> for OperandType {
-    type Error = Error;
-
-    fn try_from(value: &Token) -> Result<Self, Self::Error> {
-        match value.t {
-            TokenData::Literal(tokens::Literal::I(i)) => Ok(OperandType::I(i)),
-            TokenData::Literal(tokens::Literal::F(f)) => Ok(OperandType::F(f)),
-            TokenData::Literal(tokens::Literal::B(b)) => Ok(OperandType::B(b)),
-            TokenData::Literal(tokens::Literal::S(_)) => Err(value.to_err("Unexpected string literal.").into()),
-            _ => Err(value.to_err("Unexpected non-literal token.").into()),
-        }
-    }
-}
-
-
-#[derive(Clone, Copy, Debug)]
-pub enum Operation {
-    ReadState(usize),
-    WriteState(usize),
-    Push(OperandType),
-    Equals,
-    Greater,
-    Smaller,
-    GreaterOrEquals,
-    SmallerOrEquals,
-    Not, 
-    And,
-    Or,
-    OrNot, // used in inertia calculation only
-    Subtract,
-    Add,
-    Multiply,
-    Divide,
-    ReadBlackboard(usize),
-    WriteBlackboard(usize),
-    PlanTask(usize),
-    CallOperator(usize, usize), // (operator_id, arity)
-}
 #[derive(Debug)]
 pub struct PrimitiveTask {
     pub preconditions: Vec<Operation>,
@@ -180,18 +106,7 @@ impl Task {
 }
 
 
-struct ExpressionCompiler {
-    pub bytecode:Vec<Operation>,
-    pub type_map: HashMap<String, Vec<String>>,
-    pub binding: Option<Binding>,
-    pub substitution_id: usize,
-    pub is_body: bool,
-    pub is_class_definition: Option<String>,
-    pub state_mapping:HashMap<String, usize>,
-    pub blackboard_mapping:HashMap<String, usize>,
-    pub operator_mapping:HashMap<String, usize>,
-    task_mapping: HashMap<String, usize>,
-}
+
 
 /// Structure that holds parsed out AST as well as optimization data
 pub struct Domain {
@@ -299,208 +214,15 @@ impl std::fmt::Debug for Domain {
 
 
 
-impl ExpressionCompiler {
-    pub fn new() -> Self {
-        Self { bytecode: Vec::new(), 
-            state_mapping: HashMap::new(), 
-            blackboard_mapping: HashMap::new(), 
-            is_body:false, 
-            is_class_definition:None,
-            operator_mapping: HashMap::new(), 
-            task_mapping:HashMap::new(), 
-            type_map:HashMap::new(), 
-            binding: None,
-            substitution_id:0,
-            }
-    }
-    #[inline]
-    fn get_varpath_state_idx(&mut self, var_path:&[Token]) -> Result<usize, Error> {
-        let mut iter = var_path.iter();
-        let first = iter.by_ref().take(1).map(|t| -> Result<String, Error> {
-                if let Token{t:TokenData::Label(s),..} = t {
-                    if let Some(Binding{class_type, variable_name}) = &self.binding {
-                        if s == variable_name {
-                            if self.type_map.contains_key(class_type) {
-                                Ok(self.type_map.get(class_type).unwrap()[self.substitution_id].clone())
-                            } else {
-                                Err(t.to_err("Undefined class.").into())
-                            }
-                        } else {
-                            Ok(s.clone())
-                        }
-                    } else {
-                        Ok(s.clone())
-                    }
-                } else {
-                    Ok("Default".to_owned())
-                }
-            }).fold(Ok(String::new()), |acc, item| {let acc = acc?; match &item { Ok(s) => { Ok(acc + s) }, Err(_) => item}})?;
-        let vname = iter.map(|t| if let TokenData::Label(s) = &t.t { s.as_str() } else { "" }).fold(first, |acc,item| acc + "." + item);
-        if self.state_mapping.contains_key(&vname) {
-            Ok(self.state_mapping[&vname])
-        } else {
-            let s = self.state_mapping.len();
-            self.state_mapping.insert(vname, s);
-            Ok(s)
-        }
-    }
-    #[inline]
-    fn get_varpath_blackboard_idx(&mut self, var_path:&[Token]) -> Result<usize, Error> {
-        let mut iter = var_path.iter();
-        let first = iter.by_ref().take(1).map(|t| -> Result<String, Error> {
-                if let Token{t:TokenData::Label(s),..} = t {
-                    if let Some(Binding{class_type, variable_name}) = &self.binding {
-                        if s == variable_name {
-                            if self.type_map.contains_key(class_type) {
-                                Ok(self.type_map.get(class_type).unwrap()[self.substitution_id].clone())
-                            } else {
-                                Err(t.to_err("Undefined class.").into())
-                            }
-                        } else {
-                            Ok(s.clone())
-                        }
-                    } else {
-                        Ok(s.clone())
-                    }
-                } else {
-                    Ok("Default".to_owned())
-                }
-            }).fold(Ok(String::new()), |acc, item| {let acc = acc?; match &item { Ok(s) => { Ok(acc + s) }, Err(_) => item}})?;
-        let vname = iter.map(|t| if let TokenData::Label(s) = &t.t { s.as_str() } else { "" }).fold(first, |acc,item| acc + "." + item);
-        if self.blackboard_mapping.contains_key(&vname) {
-            Ok(self.blackboard_mapping[&vname])
-        } else {
-            let s = self.blackboard_mapping.len();
-            self.blackboard_mapping.insert(vname, s);
-            Ok(s)
-        }
-    }
-}
-
-impl ExpressionVisitor<(), Error> for ExpressionCompiler {
-    fn visit_binary_expr(&mut self, token: &Token, left: &Expr, right: &Expr) -> Result<(), Error> {
-        left.accept(self)?;
-        right.accept(self)?;
-        use TokenData::*;
-        match token.t {
-            NotEquals => {self.bytecode.push(Operation::Not); Ok(self.bytecode.push(Operation::Equals))},
-            EqualsEquals => Ok(self.bytecode.push(Operation::Equals)),
-            Smaller => Ok(self.bytecode.push(Operation::Smaller)),
-            SmallerOrEquals => Ok(self.bytecode.push(Operation::SmallerOrEquals)),
-            Greater => Ok(self.bytecode.push(Operation::Greater)),
-            GreaterOrEquals => Ok(self.bytecode.push(Operation::GreaterOrEquals)),
-            And => Ok(self.bytecode.push(Operation::And)),
-            Or => Ok(self.bytecode.push(Operation::Or)),
-            Minus => Ok(self.bytecode.push(Operation::Subtract)),
-            Plus => Ok(self.bytecode.push(Operation::Add)),
-            Slash => Ok(self.bytecode.push(Operation::Multiply)),
-            Star => Ok(self.bytecode.push(Operation::Divide)),
-            _ => Err(token.to_err("Unsupported binary expression token.").into())
-        }
-    }
-
-    fn visit_grouping_expr(&mut self, _: &Token, group: &Expr) -> Result<(), Error> {
-        group.accept(self)
-    }
-
-    fn visit_literal_expr(&mut self, token: &Token, _:&tokens::Literal) -> Result<(), Error> {
-        use std::convert::TryFrom;
-        Ok(self.bytecode.push(Operation::Push(OperandType::try_from(token)?)))
-    }
-
-    fn visit_variable_expr(&mut self, var_path:&[Token]) -> Result<(), Error> {
-        if self.is_body {
-            let idx = self.get_varpath_blackboard_idx(var_path)?;
-            Ok(self.bytecode.push(Operation::ReadBlackboard(idx)))
-        } else if let Some(class) = &self.is_class_definition { 
-            if !self.type_map.contains_key(class) {
-                self.type_map.insert(class.clone(), Vec::new());
-            }
-            if var_path.len() == 1 {
-                if let TokenData::Label(s) = &var_path[0].t {
-                    self.type_map.get_mut(class).unwrap().push(s.clone());
-                    Ok(())
-                } else {
-                    Err(var_path[0].to_err("Expected label.").into())
-                }
-                
-            } else {
-                Err(var_path[0].to_err("Object properties are not allowed in type definition").into())
-            }
-        } else {
-            let idx = self.get_varpath_state_idx(var_path)?;
-            Ok(self.bytecode.push(Operation::ReadState(idx)))
-        }
-    }
-
-    fn visit_unary_expr(&mut self, token: &Token, right: &Expr) -> Result<(), Error> {
-        match token.t {
-            TokenData::Not => {right.accept(self)?; Ok(self.bytecode.push(Operation::Not))}
-            _ => Err(token.to_err("Unsupported unary operation.").into())
-        }
-    }
-
-    fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr) -> Result<(), Error> {
-        left.accept(self)?;
-        if self.is_body {
-            let idx = self.get_varpath_blackboard_idx(var_path)?;
-            Ok(self.bytecode.push(Operation::WriteBlackboard(idx)))
-        } else {
-            let idx = self.get_varpath_state_idx(var_path)?;
-            Ok(self.bytecode.push(Operation::WriteState(idx)))
-        }
-    }
-
-    fn visit_call_expr(&mut self, _token: &Token, name:&str, args:&[Expr]) -> Result<(), Error> {
-        args.iter().try_for_each(|arg| arg.accept(self))?;
-        if self.task_mapping.contains_key(name) {
-            Ok(self.bytecode.push(Operation::PlanTask(self.task_mapping[name])))
-        } else {
-            if self.operator_mapping.contains_key(name) {
-                Ok(self.bytecode.push(Operation::CallOperator(self.operator_mapping[name], args.len())))
-            } else {
-                let idx = self.operator_mapping.len();
-                self.operator_mapping.insert(name.to_owned(), idx);
-                Ok(self.bytecode.push(Operation::CallOperator(idx, args.len())))
-            }
-        }
-    }
-
-    fn visit_nop_expr(&mut self, _: &Token) -> Result<(), Error> {
-        Ok(())
-    }
-}
 
 
 
 impl StatementVisitor<(), Error> for Domain {
-    fn visit_method(&mut self, _:&Token, _name:&str, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, else_cost:Option<i32>, else_body:Option<&Stmt>) -> Result<(), Error> {
-        // println!("Building method {} is_body = {}", _name, self.compiler.is_body);
-        self.compiler.is_body = false; // this method is a task's body, unset it for building preconditions
-        preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(OperandType::B(true)))))?;
-        let preconditions = mem::take(&mut self.compiler.bytecode);
-        let wants = optimization::build_wants(&preconditions)?;
-        self.compiler.is_body = true;
-        body.accept(self)?;
-        self.compiler.is_body = false;
-        let body = mem::take(&mut self.compiler.bytecode);
-        let effects = Vec::new();
-        if let Some(else_body) = else_body {
-            let mut else_conditions = preconditions.clone();
-            self.methods.push(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects, wants, provides:HashMap::new()});
-            else_conditions.push(Operation::Not);
-            let else_wants = optimization::build_wants(&else_conditions)?;
-            else_body.accept(self)?;
-            let body = mem::take(&mut self.compiler.bytecode);
-            let effects = Vec::new();
-            self.methods.push(PrimitiveTask{preconditions:else_conditions, cost:else_cost.unwrap_or(0), body, effects, wants:else_wants, provides:HashMap::new()})
-        } else {
-            self.methods.push(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects, wants, provides:HashMap::new()});
-        }
+    fn visit_task_declaration(&mut self, name:&[Token]) -> Result<(), Error> {
+        println!("Declaring task: {}", name.iter().map(|t| t.unwrap_identifier()).fold(String::new(), |acc,item| acc + item + "."));
         Ok(())
     }
-
-    fn visit_task(&mut self, token:&Token, name:&str, binding:Option<&Binding>, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, effects:Option<&Stmt>) -> Result<(), Error> {
+    fn visit_task(&mut self, name:&[Token], preconditions:Option<&Expr>, cost:Option<&Expr>, binding:Option<(&str, &str)>, body:&Stmt, effects:Option<&Stmt>, planning:Option<&Stmt>) -> Result<(), Error> {
         if self.pass_count == 0 { // on the first pass we figure out task name mapping only, so that we can differentiate between operators and tasks
             let task_id = self.compiler.task_mapping.len();
             self.compiler.task_mapping.insert(name.to_owned(), task_id).and_then(|_| Some(Err(token.to_err("Duplicate task name.")))).unwrap_or(Ok(()))?;
@@ -535,16 +257,17 @@ impl StatementVisitor<(), Error> for Domain {
         expr.accept(&mut self.compiler)
     }
 
-    fn visit_type(&mut self, _token:&Token, name:&str, body:&Stmt) -> Result<(), Error> {
+    fn visit_type(&mut self, token:&Token, body:&Stmt) -> Result<(), Error> {
         if self.pass_count == 0 {
-            self.compiler.is_class_definition = Some(String::from(name));
+            self.compiler.is_class_definition = Some(String::from(token.unwrap_identifier()));
             body.accept(self)?;
             self.compiler.is_class_definition = None;
         }
         Ok(())
     }
 
-    fn visit_include(&mut self, _token:&Token, filepath:&str) -> Result<(), Error> {
+    fn visit_include(&mut self, token:&Token) -> Result<(), Error> {
+        let filepath = token.unwrap_literal().unwrap_str();
         if self.pass_count == 0 {
             match self.compile(filepath, true) {
                 Ok(_) => Ok(()),
@@ -636,12 +359,15 @@ impl Domain {
 
     fn compile(&mut self, filepath:&str, is_include:bool) -> Result<(), Error> {
         let content = fs::read_to_string(filepath)?;
-        let ast = Parser::parse(content.as_str())?;
         let current_pass_count = self.pass_count;
         self.pass_count = 0;
-        ast.iter().try_for_each(|s| s.accept(self))?;
+        for stmt in Parser::new(content.as_str()) {
+            stmt?.accept(self)?
+        }
         self.pass_count = 1;
-        ast.iter().try_for_each(|s| s.accept(self))?;
+        for stmt in Parser::new(content.as_str()) {
+            stmt?.accept(self)?
+        }
         self.pass_count = current_pass_count;
         if !is_include && self.main_id.is_none() {
             Err(Error::Domain(filepath.to_owned(), "Main task not found.".to_string()))
