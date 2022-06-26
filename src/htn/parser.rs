@@ -94,7 +94,7 @@ impl<'a> Iterator for Parser<'a> {
 // }
 
 
-impl Parser<'_> {
+impl<'a> Parser<'a> {
     const EOF_ERROR:Error = Error{line:0, col:0, message:String::from("Unexpected end of file.")};
     // fn error_recover(&mut self) {
     //     self.idx += 1;
@@ -109,134 +109,125 @@ impl Parser<'_> {
     //         self.idx += 1;
     //     }
     // }
-    fn primary(&mut self) -> Result<Expr, Error> {
+    fn primary(&mut self) -> Result<Expr<'a>, Error> {
         // Literal | Label | "(" expression ")"
-        match punwrap!(self.lexer.next()) {
-            token @ Token::Literal{..} => Some(Ok(Expr::Literal(token))),
-            token @ Token::Label{..} => {
-                let mut var_path = vec!(token);
-                while let Some(Ok(Token::Dot{..})) = self.lexer.peek() {
-                    self.lexer.next();
-                    pexpect!(self, token @ Token::Label, {var_path.push(token);}, "Expected identifier.");
+        match self.lexer.peek() {
+            Some(Ok(Token{t:Literal(_),..})) => Ok(Expr::Literal(self.lexer.next().unwrap().unwrap())),
+            Some(Ok(Token{t:Identifier(_),..})) => Ok(Expr::Variable(self.parse_object_path()?)),
+            Some(Ok(Token{t:OpenParenthesis,..})) => {
+                let token = self.lexer.next().unwrap().unwrap();
+                let expr = self.expression()?;
+                if self.lexer.next_if(|t| match t { Ok(Token{t:CloseParenthesis,..})=>true,_=>false}).is_some() {
+                    Ok(Expr::Grouping(Box::new(expr), token))
+                } else {
+                    Err(token.to_err("Expected ')' after expression."))
                 }
-                Some(Ok(Expr::Variable(var_path)))
             },
-            Token::OpenParenthesis{..} => {
-                let expr = punwrap!(self.expression());
-                pexpect!(self, Token::CloseParenthesis{..}, {expr}, "Expected ')'.")
-            }
-            token => Some(Err(token.to_err("Expected expression.")))
+            Some(Ok(token)) => Err(token.to_err("Expected expression.")),
+            Some(Err(e)) => Err(self.lexer.next().unwrap().unwrap_err()),
+            None => Err(Parser::EOF_ERROR),
         }
     }
 
-    fn call(&mut self) -> Result<Expr, Error> {
-        let expr = punwrap!(self.primary());
-        if let Some(Ok(Token::OpenParenthesis{..})) = self.lexer.peek() {
+    fn call(&mut self) -> Result<Expr<'a>, Error> {
+        let expr = self.primary()?;
+        if let Some(Ok(Token{t:OpenParenthesis,..})) = self.lexer.peek() {
             self.lexer.next();
             if let Expr::Variable(name) = expr {
                 if name.len() == 1 {
                     let mut args = Vec::<Expr>::new();
                     loop {
-                        if let Some(Ok(Token::CloseParenthesis{..})) = self.lexer.peek() {
-                            self.lexer.next();
+                        if self.lexer.next_if(|t| match t { Ok(Token{t:CloseParenthesis,..})=>true,_=>false}).is_some() { 
                             break
                         }
-                        args.push(punwrap!(self.expression()));
-                        match punwrap!(self.lexer.next()) {
-                            Token::Comma{..} => (),
-                            token => return Some(Err(token.to_err("Expected ','.")))
+                        args.push(self.expression()?);
+                        match self.lexer.next() {
+                            Some(Ok(Token{t:Comma,..})) => (),
+                            Some(Ok(token)) => return Err(token.to_err("Expected ','.")),
+                            Some(Err(e)) => return Err(e),
+                            None => return Err(Parser::EOF_ERROR),
                         }
                     }
-                    Some(Ok(Expr::Call(name[0], args)))
+                    Ok(Expr::Call(name[0], args))
                 } else {
-                    Some(Err(expr.to_err("Can not call object properties.")))
+                    Err(name[0].to_err("Can not call object properties."))
                 }
             } else {
-                Some(Err(expr.to_err("Expected identifier.")))
+                Err(expr.to_err("Expected identifier."))
             }
         } else {
-            Some(Ok(expr))
+            Ok(expr)
         }
     }
 
-    fn unary(&mut self) -> Result<Expr, Error> {
-        if let Some(Ok(Token::Not{..} | Token::Minus{..})) = self.lexer.peek() {
-            let operator = self.lexer.next().unwrap().unwrap();
-            let right = punwrap!(self.unary());
-            Some(Ok(Expr::Unary(operator, Box::new(right))))
+    fn unary(&mut self) -> Result<Expr<'a>, Error> {
+        if let Some(Ok(operator)) = self.lexer.next_if(|t| match t { Ok(Token{t:Not | Minus,..})=>true,_=>false}) {
+            let right = self.unary()?;
+            Ok(Expr::Unary(operator, Box::new(right)))
         } else {
             self.call()
         }
     }
-    fn factor(&mut self) -> Result<Expr, Error> {
-        let mut expr = punwrap!(self.unary());
-        while let Some(Ok(Token::Slash{..} | Token::Star{..}))  = self.lexer.peek() {
-            let operator = self.lexer.next().unwrap().unwrap();
-            let right = punwrap!(self.unary());
+    fn factor(&mut self) -> Result<Expr<'a>, Error> {
+        let mut expr = self.unary()?;
+        while let Some(Ok(operator)) = self.lexer.next_if(|t| match t { Ok(Token{t:Slash | Star,..})=>true,_=>false}) {
+            let right = self.unary()?;
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
-        Some(Ok(expr))
+        Ok(expr)
     }
-    fn term(&mut self) -> Result<Expr, Error> {
-        let mut expr = punwrap!(self.factor());
-        while let Some(Ok(Token::Minus{..} | Token::Plus{..})) = self.lexer.peek() {
-            let operator = self.lexer.next().unwrap().unwrap();
-            let right = punwrap!(self.factor());
+    fn term(&mut self) -> Result<Expr<'a>, Error> {
+        let mut expr = self.factor()?;
+        while let Some(Ok(operator)) = self.lexer.next_if(|t| match t { Ok(Token{t:Minus | Plus,..})=>true,_=>false}) {
+            let right = self.factor()?;
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
-        Some(Ok(expr))
+        Ok(expr)
     }
-    fn comparison(&mut self) -> Result<Expr, Error> {
-        let mut expr = punwrap!(self.term());
-        while let Some(Ok(Token::Greater{..} | Token::GreaterOrEquals{..} | Token::Smaller{..} | Token::SmallerOrEquals{..})) = self.lexer.peek() {
-            let operator = self.lexer.next().unwrap().unwrap();
-            let right = punwrap!(self.term());
+    fn comparison(&mut self) -> Result<Expr<'a>, Error> {
+        let mut expr = self.term()?;
+        while let Some(Ok(operator)) = self.lexer.next_if(|t| match t { Ok(Token{t:Greater | GreaterOrEquals | Smaller | SmallerOrEquals,..})=>true,_=>false}) {
+            let right = self.term()?;
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
-        Some(Ok(expr))
+        Ok(expr)
     }
-    fn equality(&mut self) -> Result<Expr, Error> {
-        let mut expr = punwrap!(self.comparison());
-        while let Some(Ok(Token::NotEquals{..} | Token::EqualsEquals{..})) = self.lexer.peek() {
-            let operator = self.lexer.next().unwrap().unwrap();
-            let right = punwrap!(self.comparison());
+    fn equality(&mut self) -> Result<Expr<'a>, Error> {
+        let mut expr =self.comparison()?;
+        while let Some(Ok(operator)) = self.lexer.next_if(|t| match t { Ok(Token{t:NotEquals | EqualsEquals,..})=>true,_=>false}) {
+            let right = self.comparison()?;
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
-        Some(Ok(expr))
+        Ok(expr)
     }
-    fn logic(&mut self) -> Result<Expr, Error> {
-        let mut expr = punwrap!(self.equality());
-        while let Some(Ok(Token::Or{..} | Token::And{..})) = self.lexer.peek() {
-            let operator = self.lexer.next().unwrap().unwrap();
-            let right = punwrap!(self.equality());
+    fn logic(&mut self) -> Result<Expr<'a>, Error> {
+        let mut expr = self.equality()?;
+        while let Some(Ok(operator)) = self.lexer.next_if(|t| match t { Ok(Token{t:Or | And,..})=>true,_=>false}) {
+            let right = self.equality()?;
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
-        Some(Ok(expr))
+        Ok(expr)
     }
-    fn assignment(&mut self) -> Result<Expr, Error> {
-        let target = punwrap!(self.logic());
-        if let Some(Ok(Token::Equals{..} | Token::AddTo{..} | Token::SubtractFrom{..} | Token::DivideBy{..}| Token::MultiplyBy{..})) = self.lexer.peek() {
-            let operator = self.lexer.next().unwrap().unwrap();
-            if let Expr::Variable(varname) = target {
-                let line = operator.line();
-                let col = operator.col();
-                let value_expr = match operator {
-                    Token::AddTo{..} => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token::Plus{line, col, len:0}, Box::new(punwrap!(self.expression()))),
-                    Token::SubtractFrom{..} => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token::Minus{line, col, len:0}, Box::new(punwrap!(self.expression()))),
-                    Token::MultiplyBy{..} => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token::Star{line, col, len:0}, Box::new(punwrap!(self.expression()))),
-                    Token::DivideBy{..} => Expr::Binary(Box::new(Expr::Variable(varname.clone())), Token::Slash{line, col, len:0}, Box::new(punwrap!(self.expression()))),
-                    _ => punwrap!(self.expression()),
-                };
-                Some(Ok(Expr::Assignment(varname, Box::new(value_expr))))
-            } else {
-                Some(Err(target.to_err("Invalid assignment target.")))
-            }
+    fn assignment(&mut self) -> Result<Expr<'a>, Error> {
+        let target = self.logic()?;
+        if let Some(Ok(operator)) = self.lexer.next_if(|t| match t { Ok(Token{t:Equals | AddTo | SubtractFrom | DivideBy | MultiplyBy,..})=>true,_=>false}) {
+            let target = self.parse_object_path()?;
+            let line = operator.line;
+            let col = operator.col;
+            let value_expr = match operator {
+                Token{t:AddTo,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Plus}, Box::new(self.expression()?)),
+                Token{t:SubtractFrom,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Minus}, Box::new(self.expression()?)),
+                Token{t:MultiplyBy,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Star}, Box::new(self.expression()?)),
+                Token{t:DivideBy,..} => Expr::Binary(Box::new(Expr::Variable(target.clone())), Token{line, col, len:0, t:Slash}, Box::new(self.expression()?)),
+                _ => self.expression()?,
+            };
+            Ok(Expr::Assignment(target, Box::new(value_expr)))
         } else {
-            Some(Ok(target))
+            Ok(target)
         }
     }
     
-    fn expression(&mut self) -> Result<Expr, Error> {
+    fn expression(&mut self) -> Result<Expr<'a>, Error> {
         if let Some(Ok(token)) = self.lexer.next_if(|t| match t {Ok(Token{t:Pass,..})=>true,_=>false}) {
             Ok(Expr::Nop(token))
         } else {
@@ -244,7 +235,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_object_path(&mut self) -> Result<Vec<Token>, Error> {
+    fn parse_object_path(&mut self) -> Result<Vec<Token<'a>>, Error> {
         let mut name = vec![match self.lexer.next() {
             Some(Ok(token @ Token{t:Identifier(_),..})) => Ok(token),
             Some(Ok(token)) => Err(token.to_err("Expected identifier.")),
@@ -261,7 +252,7 @@ impl Parser<'_> {
         }
         Ok(name)
     }
-    fn parse_preconditions(&mut self) -> Result<Option<Expr>, Error> {
+    fn parse_preconditions(&mut self) -> Result<Option<Expr<'a>>, Error> {
         if self.lexer.next_if(|t| match t { Ok(Token{t:OpenParenthesis,..})=>true, _=>false}).is_some() {
             let preconditions = self.expression()?;
             match self.lexer.next() {
@@ -275,7 +266,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_cost(&mut self) -> Result<Option<Expr>, Error> {
+    fn parse_cost(&mut self) -> Result<Option<Expr<'a>>, Error> {
         if self.lexer.next_if(|t| match t { Ok(Token{t:Cost,..})=>true, _=>false}).is_some() {
             Ok(Some(self.expression()?))
         } else {
@@ -283,7 +274,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_body(&mut self) -> Result<Stmt, Error> {
+    fn parse_body(&mut self) -> Result<Stmt<'a>, Error> {
         match self.lexer.next() {
             Some(Ok(Token{t:Colon,..})) => Ok(self.statement()?),
             Some(Ok(token)) => Err(token.to_err("Expected ':'.")),
@@ -291,7 +282,7 @@ impl Parser<'_> {
             None => Err(Parser::EOF_ERROR),
         }
     }
-    fn parse_binding(&mut self) -> Result<Option<(&str, &str)>, Error> {
+    fn parse_binding(&mut self) -> Result<Option<(&'a str, &'a str)>, Error> {
         if let Some(Ok(for_token)) = self.lexer.next_if(|t| match t { Ok(Token{t:For,..})=>true, _=>false}) {
             let class = match self.lexer.next() {
                 Some(Ok(Token{t:Identifier(class),..})) => Ok(class),
@@ -315,7 +306,7 @@ impl Parser<'_> {
         }
     }
 
-    fn task_statement(&mut self) -> Result<Stmt, Error> {
+    fn task_statement(&mut self) -> Result<Stmt<'a>, Error> {
         let name = self.parse_object_path()?;
         if let Some(Ok(Token{t:StatementEnd,..})) = self.lexer.peek() {
             Ok(Stmt::TaskDeclaration{name})
@@ -338,7 +329,7 @@ impl Parser<'_> {
         }
     }
         
-    fn expression_statement(&mut self) -> Result<Stmt, Error> {
+    fn expression_statement(&mut self) -> Result<Stmt<'a>, Error> {
         let expr = self.expression()?;
         if self.lexer.next_if(|t| match t { Ok(Token{t:StatementEnd,..}) => true, _ => false } ).is_some() {
             Ok(Stmt::Expression(expr))
@@ -346,7 +337,7 @@ impl Parser<'_> {
             Err(expr.to_err("Expected new line after expression."))
         }
     }
-    fn block_statement(&mut self) -> Result<Stmt, Error> {
+    fn block_statement(&mut self) -> Result<Stmt<'a>, Error> {
         let mut stmts = Vec::<Stmt>::new();
         loop {
             stmts.push(self.statement()?);
@@ -356,7 +347,7 @@ impl Parser<'_> {
         }
         
     }
-    fn include_statement(&mut self) -> Result<Stmt, Error> {
+    fn include_statement(&mut self) -> Result<Stmt<'a>, Error> {
         let target = match self.lexer.next() {
             Some(Ok(token @ Token{t:Literal(S(src)),..})) => Ok(token),
             Some(Ok(token)) => Err(token.to_err("Expected string literal.")),
@@ -369,7 +360,7 @@ impl Parser<'_> {
             Err(target.to_err("Expected new line after expression."))
         }
     }
-    fn type_statement(&mut self) -> Result<Stmt, Error> {
+    fn type_statement(&mut self) -> Result<Stmt<'a>, Error> {
         let name = match self.lexer.next() {
             Some(Ok(token @ Token{t:Identifier(_),..})) => Ok(token),
             Some(Ok(token)) => Err(token.to_err("Expected type name.")),
@@ -380,7 +371,7 @@ impl Parser<'_> {
         Ok(Stmt::Type{name, body})
     }
 
-    fn statement(&mut self)-> Result<Stmt, Error> {
+    fn statement(&mut self)-> Result<Stmt<'a>, Error> {
         let stmt = match self.lexer.next() {
             Some(Ok(Token{t:Task,..})) => self.task_statement(),
             Some(Ok(Token{t:BlockStart,..})) => self.block_statement(),
@@ -397,11 +388,9 @@ impl Parser<'_> {
             None => Err(Parser::EOF_ERROR),
         }
     }
-}
 
-impl<'a> Parser<'a> {
     pub fn new(code:&'a str) -> Self {
-        let lexer = Lexer::new(code).peekable();
+        let lexer = Lexer::<'a>::new(code).peekable();
         Self{lexer}
     }
 }

@@ -61,7 +61,7 @@ impl StatementVisitor<(), std::fmt::Error> for StmtFormatter<'_, '_> {
         self.write_var_path(name)
     }
 
-    fn visit_task(&mut self, name:&[Token], preconditions:Option<&Expr>, cost:Option<i32>, binding:Option<(&str, &str)>, body:&Stmt, effects:Option<&Stmt>, planning:Option<&Stmt>) -> std::fmt::Result {
+    fn visit_task(&mut self, name:&[Token], preconditions:Option<&Expr>, cost:Option<&Expr>, binding:Option<(&str, &str)>, body:&Stmt, effects:Option<&Stmt>, planning:Option<&Stmt>) -> std::fmt::Result {
         self.visit_task_declaration(name)?;
         preconditions.and_then(|p| Some(write!(self.f, "({})", p))).unwrap_or(Ok(()))?;
         binding.and_then(|(class, variable)| Some(write!(self.f, " for {} as {}", class, variable))).unwrap_or(Ok(()))?;
