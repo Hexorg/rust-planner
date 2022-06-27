@@ -3,7 +3,7 @@ use std::mem;
 use std::{fs, fmt::Debug,  collections::HashMap};
 
 use super::optimization::{self, Inertia};
-use super::parser::expression::ExpressionVisitor;
+use super::compiler::Operation;
 use super::parser::statement::StatementVisitor;
 use super::parser::{Parser, statement::Stmt, tokens::{self, Token, TokenData}, expression::Expr};
 use super::parser;

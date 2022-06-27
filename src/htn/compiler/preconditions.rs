@@ -4,21 +4,21 @@ use crate::htn::parser::expression::{Expr, ExpressionVisitor};
 
 use super::*;
 
-struct PreconditionsCompiler<'mapping, 'var> {
+struct PreconditionsCompiler<'mapping> {
     // pub bytecode:Vec<Operation>,
     // pub type_map: HashMap<String, Vec<String>>,
     // pub binding: Option<(String, String)>,
     // pub substitution_id: usize,
     // pub is_body: bool,
     // pub is_class_definition: Option<String>,
-    state_mapping:&'mapping mut HashMap<&'var str, usize>,
+    state_mapping:&'mapping mut HashMap<String, usize>,
     // pub blackboard_mapping:HashMap<String, usize>,
     // pub operator_mapping:HashMap<String, usize>,
     // task_mapping: HashMap<String, usize>,
 }
 
-impl<'mapping,'var> PreconditionsCompiler<'mapping,'var> {
-    pub fn new(state_mapping:&'mapping mut HashMap<&'var str, usize>) -> Self {
+impl<'mapping> PreconditionsCompiler<'mapping> {
+    pub fn new(state_mapping:&'mapping mut HashMap<String, usize>) -> Self {
         Self { //bytecode: Vec::new(), 
             state_mapping, 
             // blackboard_mapping: HashMap::new(), 
@@ -32,7 +32,7 @@ impl<'mapping,'var> PreconditionsCompiler<'mapping,'var> {
             }
     }
     #[inline]
-    fn get_varpath_state_idx(&mut self, var_path:&[Token]) -> Result<usize, domain::Error> {
+    fn get_varpath_state_idx(&mut self, var_path:&[Token]) -> Result<usize, Error> {
         let mut iter = var_path.iter();
         let first = iter.by_ref().take(1).map(|t| t.unwrap_identifier()).fold(String::new(), |acc, item| acc + item);
         let vname = iter.map(|t| t.unwrap_identifier()).fold(first, |acc,item| acc + "." + item);
@@ -40,14 +40,14 @@ impl<'mapping,'var> PreconditionsCompiler<'mapping,'var> {
             Ok(self.state_mapping[vname.as_str()])
         } else {
             let s = self.state_mapping.len();
-            self.state_mapping.insert(vname.as_str(), s);
+            self.state_mapping.insert(vname, s);
             Ok(s)
         }
     }
 }
 
-impl<'mapping, 'var> ExpressionVisitor<Vec<Operation>, domain::Error> for PreconditionsCompiler<'mapping, 'var> {
-    fn visit_binary_expr(&mut self, token: &Token, left: &Expr, right: &Expr) -> Result<Vec<Operation>, domain::Error> {
+impl<'mapping> ExpressionVisitor<Vec<Operation>, Error> for PreconditionsCompiler<'mapping> {
+    fn visit_binary_expr(&mut self, token: &Token, left: &Expr, right: &Expr) -> Result<Vec<Operation>, Error> {
         let mut bytecode = left.accept(self)?;
         bytecode.extend(right.accept(self)?);
         match token.t {
@@ -67,36 +67,61 @@ impl<'mapping, 'var> ExpressionVisitor<Vec<Operation>, domain::Error> for Precon
         }
     }
 
-    fn visit_grouping_expr(&mut self, _: &Token, group: &Expr) -> Result<Vec<Operation>, domain::Error> {
+    fn visit_grouping_expr(&mut self, _: &Token, group: &Expr) -> Result<Vec<Operation>, Error> {
         group.accept(self)
     }
 
-    fn visit_literal_expr(&mut self, token: &Token) -> Result<Vec<Operation>, domain::Error> {
+    fn visit_literal_expr(&mut self, token: &Token) -> Result<Vec<Operation>, Error> {
         use std::convert::TryFrom;
         Ok(vec![Operation::Push(OperandType::try_from(*token)?)])
     }
 
-    fn visit_variable_expr(&mut self, var_path:&[Token]) -> Result<Vec<Operation>, domain::Error> {
+    fn visit_variable_expr(&mut self, var_path:&[Token]) -> Result<Vec<Operation>, Error> {
         let idx = self.get_varpath_state_idx(var_path)?;
         Ok(vec![Operation::ReadState(idx)])
     }
 
-    fn visit_unary_expr(&mut self, token: &Token, right: &Expr) -> Result<Vec<Operation>, domain::Error> {
+    fn visit_unary_expr(&mut self, token: &Token, right: &Expr) -> Result<Vec<Operation>, Error> {
         match token.t {
             Not => {let mut bytecode = right.accept(self)?; bytecode.push(Operation::Not); Ok(bytecode)}
             _ => Err(token.to_err("Unsupported unary operation.").into())
         }
     }
 
-    fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr) -> Result<Vec<Operation>, domain::Error> {
+    fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr) -> Result<Vec<Operation>, Error> {
         panic!("Unable to assign in preconditions.")
     }
 
-    fn visit_call_expr(&mut self, target: &Token, args:&[Expr]) -> Result<Vec<Operation>, domain::Error> {
+    fn visit_call_expr(&mut self, target: &Token, args:&[Expr]) -> Result<Vec<Operation>, Error> {
         panic!("Unable to call in preconditions.")
     }
 
-    fn visit_nop_expr(&mut self, _: &Token) -> Result<Vec<Operation>, domain::Error> {
+    fn visit_nop_expr(&mut self, _: &Token) -> Result<Vec<Operation>, Error> {
         panic!("Unable to NOP in preconditions. Use preconditions = None instead.")
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::htn::parser::{Parser, statement::Stmt};
+
+    use super::{Operation::*, OperandType::*, PreconditionsCompiler};
+    #[test]
+    fn test_basic() {
+        let code = "v + 5 - 2";
+        let mut parser = Parser::new(code);
+        if let Some(Ok(Stmt::Expression(expr))) = parser.next() {
+            let mut mapping = HashMap::new();
+            let mut compiler = PreconditionsCompiler::new(&mut mapping);
+            let bytecode = expr.accept(&mut compiler);
+            assert!(bytecode.is_ok());
+            let bytecode = bytecode.unwrap();
+            assert_eq!(bytecode, vec![ReadState(0), Push(I(5)), Add, Push(I(2)), Subtract]);
+        } else {
+            assert!(false); // Parser failed.
+        }
+    }
+
 }

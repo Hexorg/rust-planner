@@ -1,6 +1,6 @@
 
-use super::parser::tokens::{Token, TokenData::*, Literal};
-use super::domain;
+use super::parser::{Error, tokens::{Token, TokenData::*, Literal}};
+// use super::domain;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum OperandType {
@@ -41,7 +41,7 @@ impl std::hash::Hash for OperandType {
 }
 
 impl std::convert::TryFrom<Token<'_>> for OperandType {
-    type Error = domain::Error;
+    type Error = Error;
 
     fn try_from(value: Token) -> Result<Self, Self::Error> {
         match value.t {
@@ -55,7 +55,7 @@ impl std::convert::TryFrom<Token<'_>> for OperandType {
 }
 
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Operation {
     ReadState(usize),
     WriteState(usize),
@@ -78,5 +78,6 @@ pub enum Operation {
     PlanTask(usize),
     CallOperator(usize, usize), // (operator_id, arity)
 }
+
 
 pub mod preconditions;

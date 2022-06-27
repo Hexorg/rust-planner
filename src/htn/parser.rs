@@ -53,7 +53,9 @@ impl<'a> Iterator for Parser<'a> {
 impl<'a> Parser<'a> {
     fn error_recover(&mut self) {
         loop {
-            self.lexer.next_if(|t| match t {Ok(Token{t:Task,..})=>false,_=>true});
+            if self.lexer.next_if(|t| match t {Ok(Token{t:Task,..})=>false,_=>true}).is_none() {
+                break
+            }
         }
     }
     fn make_eof_error(&self) -> Error {
@@ -421,13 +423,13 @@ mod tests {
         assert_eq!(parser.next(), Some(Err(Error{line:1, col:11, message:String::from("Expected expression.")})));
         parser.error_recover();
         assert_eq!(parser.next(), Some(Ok(Stmt::Task{
-            name: vec![Token{line:1, col:6, len:4, t:Identifier("Main")},Token{line:1, col:11, len:3, t:Identifier("eat")}], 
-            preconditions: Some(Expr::Binary(Box::new(Expr::Variable(vec![Token{line:1, col:16, len:6, t:Identifier("hunger")}])), Token{line:1, col:23, len:1, t:Greater}, Box::new(Expr::Literal(Token{line:1, col:25, len:3, t:Literal(F(5.0))})))), 
-            cost: Some(Expr::Binary(Box::new(Expr::Literal(Token{line:1, col:51, len:4, t:Literal(F(20.0))})), Token{line:1, col:55, len:1, t:Minus}, Box::new(Expr::Variable(vec![Token{line:1, col:56, len:6, t:Identifier("hunger")}])))), 
+            name: vec![Token{line:2, col:6, len:4, t:Identifier("Main")},Token{line:2, col:11, len:3, t:Identifier("eat")}], 
+            preconditions: Some(Expr::Binary(Box::new(Expr::Variable(vec![Token{line:2, col:16, len:6, t:Identifier("hunger")}])), Token{line:2, col:23, len:1, t:Greater}, Box::new(Expr::Literal(Token{line:2, col:25, len:3, t:Literal(F(5.0))})))), 
+            cost: Some(Expr::Binary(Box::new(Expr::Literal(Token{line:2, col:51, len:4, t:Literal(F(20.0))})), Token{line:2, col:55, len:1, t:Minus}, Box::new(Expr::Variable(vec![Token{line:2, col:56, len:6, t:Identifier("hunger")}])))), 
             binding: Some(("Pawn", "pwn")), 
-            body: Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:2, col:2, len:2, t:Identifier("op")}, Vec::new()))])), 
-            effects: Some(Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Assignment(vec![Token{line:4, col:2, len:6, t:Identifier("hunger")}], Box::new(Expr::Literal(Token{line:4, col:11, len:3, t:Literal(F(0.0))}))))]))), 
-            planning: Some(Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:6, col:2, len:3, t:Identifier("pop")}, Vec::new()))])))
+            body: Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:3, col:2, len:2, t:Identifier("op")}, Vec::new()))])), 
+            effects: Some(Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Assignment(vec![Token{line:5, col:2, len:6, t:Identifier("hunger")}], Box::new(Expr::Literal(Token{line:5, col:11, len:3, t:Literal(F(0.0))}))))]))), 
+            planning: Some(Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:7, col:2, len:3, t:Identifier("pop")}, Vec::new()))])))
         })));
         assert_eq!(parser.next(), None);
     }
