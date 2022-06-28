@@ -42,6 +42,7 @@ impl DomainConfig {
 pub struct PrimitiveTask {
     pub preconditions: Vec<Operation>,
     pub cost: i32,
+    pub requres: HashSet<usize>,
     pub body: Vec<Operation>,
     pub effects: Vec<Operation>,
     wants: HashMap<usize, Inertia>,
@@ -116,8 +117,6 @@ pub struct Domain {
     pub neighbors: HashMap<usize, Vec<usize>>,
     pub config: DomainConfig,
     main_id: Option<usize>,
-    compiler: ExpressionCompiler,
-    pass_count: usize,
     methods: Vec<PrimitiveTask>,    
 }
 
@@ -213,10 +212,6 @@ impl std::fmt::Debug for Domain {
 }
 
 
-
-
-
-
 impl StatementVisitor<(), Error> for Domain {
     fn visit_task_declaration(&mut self, name:&[Token]) -> Result<(), Error> {
         println!("Declaring task: {}", name.iter().map(|t| t.unwrap_identifier()).fold(String::new(), |acc,item| acc + item + "."));
@@ -282,28 +277,6 @@ impl StatementVisitor<(), Error> for Domain {
 
 
 impl Domain {
-    fn build_task(&mut self, preconditions:Option<&Expr>, cost:Option<i32>, body:&Stmt, effects:Option<&Stmt>) -> Result<(), Error> {
-        preconditions.and_then(|expr| Some(expr.accept(&mut self.compiler))).unwrap_or_else(|| Ok(self.compiler.bytecode.push(Operation::Push(OperandType::B(true)))))?;
-        let preconditions = mem::take(&mut self.compiler.bytecode);
-        let wants = optimization::build_wants(&preconditions)?;
-        effects.and_then(|stmt| Some(stmt.accept(self))).unwrap_or(Ok(()))?;
-        let effects = mem::take(&mut self.compiler.bytecode);
-        let provides = optimization::build_provides(&effects, &wants)?;
-        self.compiler.is_body = true;
-        body.accept(self)?;
-        self.compiler.is_body = false;
-        if self.methods.len() > 0 {
-            if self.compiler.bytecode.len() > 0 {
-                return Err(body.to_err("Can not use methods and operators at the same time in this task.").into())
-            }
-            let body = mem::take(&mut self.methods);
-            self.tasks.push(Task::Complex(ComplexTask{preconditions, cost:cost.unwrap_or(0), body, effects, wants, provides}))
-        } else {
-            let body = mem::take(&mut self.compiler.bytecode);
-            self.tasks.push(Task::Primitive(PrimitiveTask{preconditions, cost:cost.unwrap_or(0), body, effects, wants, provides}))
-        }
-        Ok(())
-    }
     fn build_neightbor_map_fully_linked(&mut self) {
         for i in 0..self.tasks.len() {
             self.neighbors.insert(i, (0..self.tasks.len()).collect());

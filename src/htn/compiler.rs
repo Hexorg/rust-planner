@@ -75,9 +75,9 @@ pub enum Operation {
     Divide,
     ReadBlackboard(usize),
     WriteBlackboard(usize),
-    PlanTask(usize),
     CallOperator(usize, usize), // (operator_id, arity)
 }
 
 
-pub mod preconditions;
+pub mod state_ops;
+pub mod plan_ops;

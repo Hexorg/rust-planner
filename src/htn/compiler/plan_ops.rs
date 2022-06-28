@@ -89,7 +89,10 @@ impl<'mapping> ExpressionVisitor<Vec<Operation>, Error> for PreconditionsCompile
     }
 
     fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr) -> Result<Vec<Operation>, Error> {
-        panic!("Unable to assign in preconditions.")
+        let idx = self.get_varpath_state_idx(var_path)?;
+        let mut expr = left.accept(self)?;
+        expr.push(Operation::WriteState(idx));
+        Ok(expr)
     }
 
     fn visit_call_expr(&mut self, target: &Token, args:&[Expr]) -> Result<Vec<Operation>, Error> {
@@ -110,7 +113,7 @@ mod tests {
     use super::{Operation::*, OperandType::*, PreconditionsCompiler};
     #[test]
     fn test_basic() {
-        let code = "v + 5 - 2";
+        let code = "p = v + 5 - 2";
         let mut parser = Parser::new(code);
         if let Some(Ok(Stmt::Expression(expr))) = parser.next() {
             let mut mapping = HashMap::new();
@@ -118,7 +121,7 @@ mod tests {
             let bytecode = expr.accept(&mut compiler);
             assert!(bytecode.is_ok());
             let bytecode = bytecode.unwrap();
-            assert_eq!(bytecode, vec![ReadState(0), Push(I(5)), Add, Push(I(2)), Subtract]);
+            assert_eq!(bytecode, vec![ReadState(1), Push(I(5)), Add, Push(I(2)), Subtract, WriteState(0)]);
         } else {
             assert!(false); // Parser failed.
         }
