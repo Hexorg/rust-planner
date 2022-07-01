@@ -49,6 +49,11 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
             let sub:Vec<(&str, &str)> = self.type_mapping[cls].iter().map(|vname| (var, *vname)).collect();
             for sub in sub {
                 let mut state_compiler = StateOpsCompiler::new(Some(sub), &mut self.state_mapping);
+                
+                let cnames = format!("{}_for_{}", name.last().unwrap().unwrap_identifier(), sub.1);
+                let mut cname = Vec::from(name);
+                cname.last_mut().unwrap().t = TokenData::Identifier(cnames.as_str());
+                super::get_varpath_idx(None, &cname, &mut self.task_mapping)?;
                 let preconditions = if let Some(p) = preconditions { p.accept(&mut state_compiler)? } else { vec![Operation::Push(OperandType::B(true))] };
                 let effects = if let Some(e) = effects { e.accept(&mut state_compiler)? } else { Vec::new() };
                 let cost = if let Some(cost) = cost { cost.accept(&mut state_compiler)?} else { vec![Operation::Push(OperandType::I(0))]};
@@ -76,6 +81,7 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
             }
         } else {
             let mut state_compiler = StateOpsCompiler::new(None, &mut self.state_mapping);
+            super::get_varpath_idx(None, name, &mut self.task_mapping)?;
             let preconditions = if let Some(p) = preconditions { p.accept(&mut state_compiler)? } else { vec![Operation::Push(OperandType::B(true))] };
             let effects = if let Some(e) = effects { e.accept(&mut state_compiler)? } else { Vec::new() };
             let cost = if let Some(cost) = cost { cost.accept(&mut state_compiler)?} else { vec![Operation::Push(OperandType::I(0))]};
@@ -129,6 +135,7 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
                 self.type_mapping.insert(cls, Vec::new());
             }
             body.accept(self)?;
+            self.currently_building_type = None;
             Ok(())
         } else {
             Err(class.to_err("Unexpected second type statement inside of a previous type statement."))

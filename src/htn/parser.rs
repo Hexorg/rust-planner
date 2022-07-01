@@ -99,6 +99,7 @@ impl<'a> Parser<'a> {
                         args.push(self.expression()?);
                         match self.lexer.next() {
                             Some(Ok(Token{t:Comma,..})) => (),
+                            Some(Ok(Token{t:CloseParenthesis,..})) => break,
                             Some(Ok(token)) => return Err(token.to_err("Expected ','.")),
                             Some(Err(e)) => return Err(e),
                             None => return Err(self.make_eof_error()),
@@ -407,14 +408,14 @@ mod tests {
 
     #[test]
     fn test_task() {
-        let code = "task Main.eat (hunger > 5.0) for Pawn on pwn cost 20.0-hunger:\n\top()\neffects:\n\thunger = 0.0\nplanning:\n\tpop()\n\n\n";
+        let code = "task Main.eat (hunger > 5.0) for Pawn on pwn cost 20.0-hunger:\n\top(arg1.p1)\neffects:\n\thunger = 0.0\nplanning:\n\tpop()\n\n\n";
         let mut parser = Parser::new(code);
         assert_eq!(parser.next(), Some(Ok(Stmt::Task{
             name: vec![Token{line:1, col:6, len:4, t:Identifier("Main")},Token{line:1, col:11, len:3, t:Identifier("eat")}], 
             preconditions: Some(Expr::Binary(Box::new(Expr::Variable(vec![Token{line:1, col:16, len:6, t:Identifier("hunger")}])), Token{line:1, col:23, len:1, t:Greater}, Box::new(Expr::Literal(Token{line:1, col:25, len:3, t:Literal(F(5.0))})))), 
             cost: Some(Expr::Binary(Box::new(Expr::Literal(Token{line:1, col:51, len:4, t:Literal(F(20.0))})), Token{line:1, col:55, len:1, t:Minus}, Box::new(Expr::Variable(vec![Token{line:1, col:56, len:6, t:Identifier("hunger")}])))), 
             binding: Some(("Pawn", "pwn")), 
-            body: Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:2, col:2, len:2, t:Identifier("op")}, Vec::new()))])), 
+            body: Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:2, col:2, len:2, t:Identifier("op")}, vec![Expr::Variable(vec![Token{line:2, col:5, len:4, t:Identifier("arg1")}, Token{line:2, col:10, len:2, t:Identifier("p1")}])]))])), 
             effects: Some(Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Assignment(vec![Token{line:4, col:2, len:6, t:Identifier("hunger")}], Box::new(Expr::Literal(Token{line:4, col:11, len:3, t:Literal(F(0.0))}))))]))), 
             planning: Some(Box::new(Stmt::Block(vec![Stmt::Expression(Expr::Call(Token{line:6, col:2, len:3, t:Identifier("pop")}, Vec::new()))])))
         })));
@@ -425,7 +426,6 @@ mod tests {
         let code = "task Wait():\ntask Main.eat (hunger > 5.0) for Pawn on pwn cost 20.0-hunger:\n\top()\neffects:\n\thunger = 0.0\nplanning:\n\tpop()\n\n\n";
         let mut parser = Parser::new(code);
         assert_eq!(parser.next(), Some(Err(Error{line:1, col:11, message:String::from("Expected expression.")})));
-        parser.error_recover();
         assert_eq!(parser.next(), Some(Ok(Stmt::Task{
             name: vec![Token{line:2, col:6, len:4, t:Identifier("Main")},Token{line:2, col:11, len:3, t:Identifier("eat")}], 
             preconditions: Some(Expr::Binary(Box::new(Expr::Variable(vec![Token{line:2, col:16, len:6, t:Identifier("hunger")}])), Token{line:2, col:23, len:1, t:Greater}, Box::new(Expr::Literal(Token{line:2, col:25, len:3, t:Literal(F(5.0))})))), 

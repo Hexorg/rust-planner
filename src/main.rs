@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use htn::parser::lexer::Lexer;
 
+
 fn main() {
     match htn::domain::Domain::from_file("htn-problems/testing.htn", HashMap::new()) {
         Ok(domain) => println!("{:?}", domain),
