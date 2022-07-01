@@ -45,7 +45,11 @@ impl<'a> Iterator for Parser<'a> {
         if let None = self.lexer.peek() {
             None
         } else {
-            Some(self.statement())
+            let r = self.statement();
+            if r.is_err() {
+                self.error_recover();
+            }
+            Some(r)
         }
     }
 }

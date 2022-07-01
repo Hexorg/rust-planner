@@ -21,7 +21,7 @@ task Main(right.bottom == 3 & right.middle == 2 & right.top == 1):
     complete()
 
 # ids: 1, 2, 3
-task Pikcup_top(carry==0 & peg.top > 0) on Peg as peg:
+task Pikcup_top(carry==0 & peg.top > 0) for Peg as peg:
     pikcup(peg.top)
 effects:
     carry = peg.top

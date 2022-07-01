@@ -9,13 +9,9 @@ use std::collections::HashMap;
 use htn::parser::lexer::Lexer;
 
 fn main() {
-    let content = std::fs::read_to_string("htn-problems/testing.htn").unwrap();
-    let lexer = Lexer::new(content.as_str());
-    for token in lexer {
-        match token {
-            Ok(t) => println!("{:?}", t),
-            Err(e) => eprintln!("{}", e),
-        }
+    match htn::domain::Domain::from_file("htn-problems/testing.htn", HashMap::new()) {
+        Ok(domain) => println!("{:?}", domain),
+        Err(e) => println!("{:?}", e),
     }
 }
 

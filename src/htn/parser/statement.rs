@@ -3,13 +3,13 @@ use super::tokens::{Token, TokenData, Literal};
 use super::expression::Expr;
 use std::fmt;
 
-pub trait StatementVisitor<T, E> {
-    fn visit_task_declaration(&mut self, name:&[Token]) -> Result<T, E>;
-    fn visit_task(&mut self, name:&[Token], preconditions:Option<&Expr>, cost:Option<&Expr>, binding:Option<(&str, &str)>, body:&Stmt, effects:Option<&Stmt>, planning:Option<&Stmt>) -> Result<T, E>;
-    fn visit_block(&mut self, block:&[Stmt]) -> Result<T, E>;
-    fn visit_expression(&mut self, expr:&Expr) -> Result<T, E>;
-    fn visit_include(&mut self, filepath:&Token) -> Result<T, E>;
-    fn visit_type(&mut self, class:&Token, body:&Stmt) -> Result<T, E>;
+pub trait StatementVisitor<'a, T, E> {
+    fn visit_task_declaration(&mut self, name:&[Token<'a>]) -> Result<T, E>;
+    fn visit_task(&mut self, name:&[Token<'a>], preconditions:Option<&Expr<'a>>, cost:Option<&Expr<'a>>, binding:Option<(&str, &str)>, body:&Stmt<'a>, effects:Option<&Stmt<'a>>, planning:Option<&Stmt<'a>>) -> Result<T, E>;
+    fn visit_block(&mut self, block:&[Stmt<'a>]) -> Result<T, E>;
+    fn visit_expression(&mut self, expr:&Expr<'a>) -> Result<T, E>;
+    fn visit_include(&mut self, filepath:&Token<'a>) -> Result<T, E>;
+    fn visit_type(&mut self, class:&Token<'a>, body:&Stmt<'a>) -> Result<T, E>;
 }
 
 
@@ -57,7 +57,7 @@ impl<'a, 'b> From<&'a mut fmt::Formatter<'b>> for StmtFormatter<'a, 'b> {
     }
 }
 
-impl StatementVisitor<(), std::fmt::Error> for StmtFormatter<'_, '_> {
+impl StatementVisitor<'_, (), std::fmt::Error> for StmtFormatter<'_, '_> {
     fn visit_task_declaration(&mut self, name:&[Token]) -> std::fmt::Result {
         write!(self.f, "{:>depth$}task {}", "", depth=self.depth)?;
         self.write_var_path(name)
@@ -100,8 +100,8 @@ impl StatementVisitor<(), std::fmt::Error> for StmtFormatter<'_, '_> {
     }
 }
 
-impl Stmt<'_> {
-    pub fn accept<R, E, T:StatementVisitor<R, E>>(&self, visitor:&mut T) -> Result<R, E> {
+impl<'a> Stmt<'a> {
+    pub fn accept<R, E, T:StatementVisitor<'a, R, E>>(&self, visitor:&mut T) -> Result<R, E> {
         match self {
             Stmt::Task {name, preconditions, cost, body, binding, effects, planning} => {
                 visitor.visit_task(name, preconditions.as_ref(), cost.as_ref(), *binding, body, effects.as_deref(), planning.as_deref())

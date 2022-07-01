@@ -1,22 +1,19 @@
 use std::collections::HashMap;
 
-use crate::htn::parser::expression::{Expr, ExpressionVisitor};
+use crate::htn::parser::{expression::{Expr, ExpressionVisitor}, statement::{Stmt, StatementVisitor}};
 
 use super::*;
 
-struct StateOpsCompiler<'a> {
-    // pub bytecode:Vec<Operation>,
-    substitution: Option<(&'a str, &'a str)>,
-    // pub is_body: bool,
-    // pub is_class_definition: Option<String>,
-    state_mapping:&'a mut HashMap<String, usize>,
+pub struct StateOpsCompiler<'a, 'b> {
+    pub substitution: Option<(&'b str, &'b str)>,
+    pub state_mapping:&'a mut HashMap<String, usize>,
     // pub blackboard_mapping:HashMap<String, usize>,
     // pub operator_mapping:HashMap<String, usize>,
     // task_mapping: HashMap<String, usize>,
 }
 
-impl<'a> StateOpsCompiler<'a> {
-    pub fn new(substitution:Option<(&'a str, &'a str)>, state_mapping:&'a mut HashMap<String, usize>) -> Self {
+impl<'a, 'b> StateOpsCompiler<'a, 'b> {
+    pub fn new(substitution:Option<(&'b str, &'b str)>, state_mapping:&'a mut HashMap<String, usize>) -> Self {
         Self { //bytecode: Vec::new(), 
             state_mapping, 
             substitution,
@@ -30,33 +27,41 @@ impl<'a> StateOpsCompiler<'a> {
             // substitution_id:0,
             }
     }
-    #[inline]
-    fn get_varpath_state_idx(&mut self, var_path:&[Token]) -> Result<usize, Error> {
-        let mut iter = var_path.iter();
-        let first = iter.by_ref().take(1).map(|t| t.unwrap_identifier()).fold(String::new(), |acc, item| {
-            acc + if let Some((from, to)) = self.substitution {
-                if item == from {
-                    to
-                } else {
-                    item
-                }
-            } else {
-                item
-            }
-        });
-        let vname = iter.map(|t| t.unwrap_identifier()).fold(first, |acc,item| acc + "." + item);
-        if self.state_mapping.contains_key(vname.as_str()) {
-            Ok(self.state_mapping[vname.as_str()])
-        } else {
-            let s = self.state_mapping.len();
-            self.state_mapping.insert(vname, s);
-            Ok(s)
+
+}
+
+impl<'a, 'b> StatementVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'a, 'b> {
+    fn visit_task_declaration(&mut self, name:&[Token]) -> Result<Vec<Operation>, Error> {
+        Err(name[0].to_err("Can not use task statement in this context."))
+    }
+
+    fn visit_task(&mut self, name:&[Token], preconditions:Option<&Expr>, cost:Option<&Expr>, binding:Option<(&str, &str)>, body:&Stmt, effects:Option<&Stmt>, planning:Option<&Stmt>) -> Result<Vec<Operation>, Error> {
+        Err(name[0].to_err("Can not use task statement in this context."))
+    }
+
+    fn visit_block(&mut self, block:&[Stmt<'a>]) -> Result<Vec<Operation>, Error> {
+        let mut result = Vec::new();
+        for stmt in block {
+            result.extend(stmt.accept(self)?);
         }
+        Ok(result)
+    }
+
+    fn visit_expression(&mut self, expr:&Expr<'a>) -> Result<Vec<Operation>, Error> {
+        expr.accept(self)
+    }
+
+    fn visit_include(&mut self, filepath:&Token) -> Result<Vec<Operation>, Error> {
+        Err(filepath.to_err("Can not use include statement in this context."))
+    }
+
+    fn visit_type(&mut self, class:&Token, body:&Stmt) -> Result<Vec<Operation>, Error> {
+        Err(class.to_err("Can not use type statement in this context."))
     }
 }
 
-impl<'a> ExpressionVisitor<Vec<Operation>, Error> for StateOpsCompiler<'a> {
-    fn visit_binary_expr(&mut self, token: &Token, left: &Expr, right: &Expr) -> Result<Vec<Operation>, Error> {
+impl<'a, 'b> ExpressionVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'a, 'b> {
+    fn visit_binary_expr(&mut self, token: &Token<'a>, left: &Expr<'a>, right: &Expr<'a>) -> Result<Vec<Operation>, Error> {
         let mut bytecode = left.accept(self)?;
         bytecode.extend(right.accept(self)?);
         match token.t {
@@ -72,11 +77,11 @@ impl<'a> ExpressionVisitor<Vec<Operation>, Error> for StateOpsCompiler<'a> {
             Plus => {bytecode.push(Operation::Add); Ok(bytecode)},
             Slash => {bytecode.push(Operation::Multiply); Ok(bytecode)},
             Star => {bytecode.push(Operation::Divide); Ok(bytecode)},
-            _ => Err(token.to_err("Unsupported binary expression token.").into())
+            _ => Err(token.to_err("Unsupported binary operation.").into())
         }
     }
 
-    fn visit_grouping_expr(&mut self, _: &Token, group: &Expr) -> Result<Vec<Operation>, Error> {
+    fn visit_grouping_expr(&mut self, _: &Token, group: &Expr<'a>) -> Result<Vec<Operation>, Error> {
         group.accept(self)
     }
 
@@ -86,30 +91,30 @@ impl<'a> ExpressionVisitor<Vec<Operation>, Error> for StateOpsCompiler<'a> {
     }
 
     fn visit_variable_expr(&mut self, var_path:&[Token]) -> Result<Vec<Operation>, Error> {
-        let idx = self.get_varpath_state_idx(var_path)?;
+        let idx = super::get_varpath_idx(self.substitution, var_path, &mut self.state_mapping)?;
         Ok(vec![Operation::ReadState(idx)])
     }
 
-    fn visit_unary_expr(&mut self, token: &Token, right: &Expr) -> Result<Vec<Operation>, Error> {
+    fn visit_unary_expr(&mut self, token: &Token, right: &Expr<'a>) -> Result<Vec<Operation>, Error> {
         match token.t {
             Not => {let mut bytecode = right.accept(self)?; bytecode.push(Operation::Not); Ok(bytecode)}
             _ => Err(token.to_err("Unsupported unary operation.").into())
         }
     }
 
-    fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr) -> Result<Vec<Operation>, Error> {
-        let idx = self.get_varpath_state_idx(var_path)?;
+    fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr<'a>) -> Result<Vec<Operation>, Error> {
+        let idx = super::get_varpath_idx(self.substitution, var_path, &mut self.state_mapping)?;
         let mut expr = left.accept(self)?;
         expr.push(Operation::WriteState(idx));
         Ok(expr)
     }
 
     fn visit_call_expr(&mut self, target: &Token, args:&[Expr]) -> Result<Vec<Operation>, Error> {
-        panic!("Unable to call in preconditions.")
+        Err(target.to_err("Can not call in this context."))
     }
 
-    fn visit_nop_expr(&mut self, _: &Token) -> Result<Vec<Operation>, Error> {
-        panic!("Unable to NOP in preconditions. Use preconditions = None instead.")
+    fn visit_nop_expr(&mut self, token: &Token) -> Result<Vec<Operation>, Error> {
+        Err(token.to_err("Can not use pass expression in this context."))
     }
 }
 
@@ -119,7 +124,7 @@ mod tests {
 
     use crate::htn::parser::{Parser, statement::Stmt};
 
-    use super::{Operation::*, OperandType::*, StateOpsCompiler};
+    use super::{Operation::*, OperandType::*, StateOpsCompiler };
     #[test]
     fn test_basic() {
         let code = "p = v + 5 - 2";

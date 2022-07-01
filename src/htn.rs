@@ -1,4 +1,4 @@
-// pub mod domain;
+pub mod domain;
 mod compiler;
 // pub mod planner;
 // pub mod vm;

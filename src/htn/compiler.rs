@@ -1,5 +1,7 @@
 
-use super::parser::{Error, tokens::{Token, TokenData::*, Literal}};
+use std::collections::HashMap;
+
+use super::parser::{Error, tokens::{Token, TokenData, Literal}};
 // use super::domain;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -42,13 +44,14 @@ impl std::hash::Hash for OperandType {
 
 impl std::convert::TryFrom<Token<'_>> for OperandType {
     type Error = Error;
-
     fn try_from(value: Token) -> Result<Self, Self::Error> {
+        use self::Literal::*;
+        use TokenData::*;
         match value.t {
-            Literal(Literal::I(i)) => Ok(OperandType::I(i)),
-            Literal(Literal::F(f)) => Ok(OperandType::F(f)),
-            Literal(Literal::B(b)) => Ok(OperandType::B(b)),
-            Literal(Literal::S(_)) => Err(value.to_err("Unexpected string literal.").into()),
+            Literal(I(i)) => Ok(OperandType::I(i)),
+            Literal(F(f)) => Ok(OperandType::F(f)),
+            Literal(B(b)) => Ok(OperandType::B(b)),
+            Literal(S(_)) => Err(value.to_err("Unexpected string literal.").into()),
             _ => Err(value.to_err("Unexpected non-literal token.").into()),
         }
     }
@@ -75,9 +78,33 @@ pub enum Operation {
     Divide,
     ReadBlackboard(usize),
     WriteBlackboard(usize),
+    PlanTask(usize),
     CallOperator(usize, usize), // (operator_id, arity)
 }
 
+#[inline]
+fn get_varpath_idx(substitution:Option<(&str, &str)>, var_path:&[Token], mapping:&mut HashMap<String, usize>) -> Result<usize, Error> {
+    let mut iter = var_path.iter();
+    let first = iter.by_ref().take(1).map(|t| t.unwrap_identifier()).fold(String::new(), |acc, item| {
+        acc + if let Some((from, to)) = substitution {
+            if item == from {
+                to
+            } else {
+                item
+            }
+        } else {
+            item
+        }
+    });
+    let vname = iter.map(|t| t.unwrap_identifier()).fold(first, |acc,item| acc + "." + item);
+    if mapping.contains_key(vname.as_str()) {
+        Ok(mapping[vname.as_str()])
+    } else {
+        let s = mapping.len();
+        mapping.insert(vname, s);
+        Ok(s)
+    }
+}
 
-pub mod state_ops;
-pub mod plan_ops;
+mod state_ops;
+pub mod domain;

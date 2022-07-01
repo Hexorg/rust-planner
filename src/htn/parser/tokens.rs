@@ -134,12 +134,12 @@ impl std::fmt::Display for Token<'_> {
     }
 }
 
-impl Token<'_> {
+impl<'a> Token<'a> {
     pub fn to_err(&self, msg:&str) -> Error {
         Error{line:self.line, col:self.col, message: String::from(msg) }
     }
 
-    pub fn unwrap_identifier(&self) -> &str {
+    pub fn unwrap_identifier(&self) -> &'a str {
         match self.t {
             TokenData::Identifier(s) => s,
             _ => panic!("Expected identifier.")

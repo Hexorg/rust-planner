@@ -2,15 +2,15 @@ use super::Error;
 use super::tokens::Token;
 use std::fmt;
 
-pub trait ExpressionVisitor<T, E> {
-    fn visit_binary_expr(&mut self, token: &Token, left: &Expr, right: &Expr) -> Result<T, E>;
-    fn visit_grouping_expr(&mut self, token: &Token, group: &Expr) -> Result<T, E>;
-    fn visit_literal_expr(&mut self, token: &Token) -> Result<T, E>;
-    fn visit_variable_expr(&mut self, var_path:&[Token]) -> Result<T, E>;
-    fn visit_unary_expr(&mut self, token: &Token, right: &Expr) -> Result<T, E>;
-    fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr) -> Result<T, E>;
-    fn visit_call_expr(&mut self, token: &Token, args:&[Expr]) -> Result<T, E>;
-    fn visit_nop_expr(&mut self, token: &Token) -> Result<T, E>;
+pub trait ExpressionVisitor<'a, T, E> {
+    fn visit_binary_expr(&mut self, token: &Token<'a>, left: &Expr<'a>, right: &Expr<'a>) -> Result<T, E>;
+    fn visit_grouping_expr(&mut self, token: &Token<'a>, group: &Expr<'a>) -> Result<T, E>;
+    fn visit_literal_expr(&mut self, token: &Token<'a>) -> Result<T, E>;
+    fn visit_variable_expr(&mut self, var_path:&[Token<'a>]) -> Result<T, E>;
+    fn visit_unary_expr(&mut self, token: &Token<'a>, right: &Expr<'a>) -> Result<T, E>;
+    fn visit_assignment_expr(&mut self, var_path:&[Token<'a>], left:&Expr<'a>) -> Result<T, E>;
+    fn visit_call_expr(&mut self, target: &Token<'a>, args:&[Expr<'a>]) -> Result<T, E>;
+    fn visit_nop_expr(&mut self, token: &Token<'a>) -> Result<T, E>;
 }
 
 #[derive(PartialEq)]
@@ -44,10 +44,14 @@ impl std::fmt::Display for Expr<'_> {
                 write!(f, " = {}", right)
             },
             Self::Call(func, args) => {
-                write!(f, "{}(", func)?; 
-                let mut i = args.iter();
-                i.by_ref().take(1).try_for_each(|expr| write!(f, "{}", expr))?;
-                i.try_for_each(|expr| write!(f, ", {}", expr))?; 
+                // let mut it = func.iter();
+                // it.by_ref().take(1).try_for_each(|v| write!(f, "{}", v))?;
+                // it.try_for_each(|v| write!(f, ".{}", v))?;
+                write!(f, "{}(", func)?;
+                // write!(f, "(")?;
+                let mut it = args.iter();
+                it.by_ref().take(1).try_for_each(|expr| write!(f, "{}", expr))?;
+                it.try_for_each(|expr| write!(f, ", {}", expr))?; 
                 write!(f, ")")
             },
             Self::Nop(_) => write!(f, "nop"),
@@ -74,10 +78,14 @@ impl std::fmt::Debug for Expr<'_> {
                 write!(f, " = {:?}", right)
             },
             Self::Call(func, args) => {
-                write!(f, "{}(", func)?; 
-                let mut i = args.iter();
-                i.by_ref().take(1).try_for_each(|expr| write!(f, "{:?}", expr))?;
-                i.try_for_each(|expr| write!(f, ", {:?}", expr))?; 
+                // let mut it = func.iter();
+                // it.by_ref().take(1).try_for_each(|v| write!(f, "func_{}", v))?;
+                // it.try_for_each(|v| write!(f, ".{}", v))?;
+                // write!(f, "(")?;
+                write!(f, "{}(", func)?;
+                let mut it = args.iter();
+                it.by_ref().take(1).try_for_each(|expr| write!(f, "{:?}", expr))?;
+                it.try_for_each(|expr| write!(f, ", {:?}", expr))?; 
                 write!(f, ")")
             },
             Self::Nop(_) => write!(f, "nop"),
@@ -86,8 +94,8 @@ impl std::fmt::Debug for Expr<'_> {
 }
 
 
-impl Expr<'_> {
-    pub fn accept<R, E, T:ExpressionVisitor<R, E>>(&self, visitor: &mut T) -> Result<R, E> {
+impl<'a> Expr<'a> {
+    pub fn accept<R, E, T:ExpressionVisitor<'a, R, E>>(&self, visitor: &mut T) -> Result<R, E> {
         match self {
             Expr::Binary(left, token, right) => visitor.visit_binary_expr(token, left, right),
             Expr::Grouping(g, token) => visitor.visit_grouping_expr(token, g),
@@ -107,7 +115,7 @@ impl Expr<'_> {
             Self::Grouping(_, tok) |
             Self::Literal(tok) |
             Self::Unary(tok, _) |
-            Self::Nop(tok) |
+            Self::Nop(tok)  |
             Self::Call(tok, _) => tok.to_err(msg),
             Self::Assignment(tok, _) |
             Self::Variable(tok) => tok.get(0).unwrap().to_err(msg)
