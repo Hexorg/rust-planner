@@ -19,13 +19,13 @@ pub enum HeuristicAlgorithm {
     None
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TaskBody {
     Primitive(Vec<Operation>),
     Composite(Vec<Task>)
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Task {
     pub preconditions: Vec<Operation>,
     pub cost: Vec<Operation>,

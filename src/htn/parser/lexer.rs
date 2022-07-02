@@ -407,4 +407,25 @@ mod tests {
         assert_eq!(l.next(), Some(Ok(Token{line:3, col:4, len:0, t:BlockEnd})));
         assert_eq!(l.next(), None);
     }
+
+    #[test]
+    fn test_ops() {
+        let code = "><-*/p=+!=<=>=!true";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:1, t:Greater})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:2, len:1, t:Smaller})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:3, len:1, t:Minus})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:4, len:1, t:Star})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:5, len:1, t:Slash})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:6, len:1, t:Identifier("p")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:7, len:1, t:Equals})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:8, len:1, t:Plus})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:9, len:2, t:NotEquals})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:11, len:2, t:SmallerOrEquals})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:13, len:2, t:GreaterOrEquals})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:15, len:1, t:Not})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:16, len:4, t:Literal(B(true))})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:20, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), None);
+    }
 }

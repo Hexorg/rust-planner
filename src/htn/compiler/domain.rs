@@ -58,7 +58,7 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
                 let effects = if let Some(e) = effects { e.accept(&mut state_compiler)? } else { Vec::new() };
                 let cost = if let Some(cost) = cost { cost.accept(&mut state_compiler)?} else { vec![Operation::Push(OperandType::I(0))]};
 
-                let planning = if let Some(p) = planning { p.accept(&mut self.compiler)? } else { Vec::new() };
+                let planning = if let Some(p) = planning { p.accept(self)?; std::mem::take(&mut self.operations) } else { Vec::new() };
                 let old = self.has_visited_task;
                 self.has_visited_task = true;
                 body.accept(self)?;
@@ -86,7 +86,7 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
             let effects = if let Some(e) = effects { e.accept(&mut state_compiler)? } else { Vec::new() };
             let cost = if let Some(cost) = cost { cost.accept(&mut state_compiler)?} else { vec![Operation::Push(OperandType::I(0))]};
 
-            let planning = if let Some(p) = planning { p.accept(&mut self.compiler)? } else { Vec::new() };
+            let planning = if let Some(p) = planning { p.accept(self)?; std::mem::take(&mut self.operations) } else { Vec::new() };
             let old = self.has_visited_task;
             self.has_visited_task = true;
             body.accept(self)?;
@@ -164,7 +164,7 @@ impl<'a, 'b> ExpressionVisitor<'b, Vec<Operation>, Error> for DomainCompiler<'a,
                 self.type_mapping.get_mut(cls).unwrap().push(var_path[0].unwrap_identifier());
             }
         }
-        let idx = super::get_varpath_idx(self.compiler.substitution, var_path, &mut self.state_mapping)?;
+        let idx = super::get_varpath_idx(self.compiler.substitution, var_path, &mut self.compiler.state_mapping)?;
         Ok(vec![Operation::ReadBlackboard(idx)])
     }
 
@@ -173,7 +173,7 @@ impl<'a, 'b> ExpressionVisitor<'b, Vec<Operation>, Error> for DomainCompiler<'a,
     }
 
     fn visit_assignment_expr(&mut self, var_path:&[Token<'b>], left:&Expr<'b>) -> Result<Vec<Operation>, Error> {
-        let idx = super::get_varpath_idx(self.compiler.substitution, var_path, &mut self.state_mapping)?;
+        let idx = super::get_varpath_idx(self.compiler.substitution, var_path, &mut self.compiler.state_mapping)?;
         let mut expr = left.accept(self)?;
         expr.push(Operation::WriteBlackboard(idx));
         Ok(expr)
@@ -205,12 +205,12 @@ impl<'a, 'b> ExpressionVisitor<'b, Vec<Operation>, Error> for DomainCompiler<'a,
 mod tests {
     use std::{collections::HashMap, hash::Hash, iter::FromIterator};
 
-    use crate::htn::parser::{Parser, statement::Stmt};
+    use crate::htn::{domain::{Task, TaskBody}, parser::{Parser, statement::Stmt}, compiler::Operation};
 
     use super::{Operation::*, OperandType::*, DomainCompiler };
     #[test]
     fn test_basic() {
-        let code = "task test(t < 5) cost t:\n\tt = op()\nplanning:\n\tpop()\neffects:\n\tt = 2";
+        let code = "task test(t < 5) cost t:\n\tt = op()\nplanning:\n\tpop(r)\neffects:\n\tt = 2";
         let mut parser = Parser::new(code);
         if let Some(Ok(stmt)) = parser.next() {
             let mut state_mapping = HashMap::new();
@@ -221,11 +221,19 @@ mod tests {
             let mut compiler = DomainCompiler::new(&mut blackboard_mapping, &mut task_mapping, &mut operator_mapping, &mut type_mapping, &mut state_mapping);
             let stmt = stmt.accept(&mut compiler);
             assert!(stmt.is_ok(), "{}", stmt.unwrap_err());
-            let domain = compiler.finish();
+            let tasks = compiler.finish();
             // println!("{:?}", compiler.task_mapping);
+            assert_eq!(task_mapping, HashMap::from([("test".to_owned(), 0)]));
             assert_eq!(state_mapping, HashMap::from([("t".to_owned(), 0)]));
-            assert_eq!(blackboard_mapping, HashMap::from([("t".to_owned(), 0)]));
-            assert_eq!(operator_mapping, HashMap::from([("op".to_owned(), 0), ("pop".to_owned(), 1)]));
+            assert_eq!(blackboard_mapping, HashMap::from([("r".to_owned(), 0), ("t".to_owned(), 1)]));
+            assert_eq!(operator_mapping, HashMap::from([("pop".to_owned(), 0), ("op".to_owned(), 1)]));
+            assert_eq!(tasks, vec![Task{ 
+                preconditions: vec![ReadState(0),Push(I(5)),Smaller], 
+                cost: vec![ReadState(0)], 
+                body: TaskBody::Primitive(vec![CallOperator(1, 0), WriteBlackboard(1)]), 
+                effects: vec![Push(I(2)), WriteState(0)], 
+                planning: vec![ReadBlackboard(0), CallOperator(0, 1)] 
+            }])
         } else {
             assert!(false); // Parser failed.
         }

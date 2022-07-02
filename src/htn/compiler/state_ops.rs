@@ -62,6 +62,7 @@ impl<'a, 'b> StatementVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'a
 
 impl<'a, 'b> ExpressionVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'a, 'b> {
     fn visit_binary_expr(&mut self, token: &Token<'a>, left: &Expr<'a>, right: &Expr<'a>) -> Result<Vec<Operation>, Error> {
+        use TokenData::*;
         let mut bytecode = left.accept(self)?;
         bytecode.extend(right.accept(self)?);
         match token.t {
