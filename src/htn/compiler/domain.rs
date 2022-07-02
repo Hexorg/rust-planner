@@ -36,52 +36,33 @@ impl<'a, 'b> DomainCompiler<'a, 'b> {
     pub fn finish(self) -> Vec<Task> {
         self.tasks
     }
+
 } 
 
 impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
     fn visit_task_declaration(&mut self, name:&[Token]) -> Result<(), Error> {
-        super::get_varpath_idx(self.compiler.substitution, name, &mut self.state_mapping)?;
+        super::get_varpath_idx(None, name, &mut self.task_mapping)?;
         Ok(())
     }
 
-    fn visit_task(&mut self, name:&[Token], preconditions:Option<&Expr>, cost:Option<&Expr>, binding:Option<(&str, &str)>, body:&Stmt<'b>, effects:Option<&Stmt>, planning:Option<&Stmt<'b>>) -> Result<(), Error> {
-        if let Some((cls, var)) = binding {
-            let sub:Vec<(&str, &str)> = self.type_mapping[cls].iter().map(|vname| (var, *vname)).collect();
-            for sub in sub {
-                let mut state_compiler = StateOpsCompiler::new(Some(sub), &mut self.state_mapping);
-                
-                let cnames = format!("{}_for_{}", name.last().unwrap().unwrap_identifier(), sub.1);
+    fn visit_task(&mut self, name:&[Token<'b>], preconditions:Option<&Expr<'b>>, cost:Option<&Expr<'b>>, binding:Option<(&'b str, &'b str)>, body:&Stmt<'b>, effects:Option<&Stmt<'b>>, planning:Option<&Stmt<'b>>) -> Result<(), Error> {
+        let sub = if let Some((cls, var)) = binding {
+            self.type_mapping[cls].iter().map(|vname| Some((var, *vname))).collect()
+        } else {
+            vec![None]
+        };
+
+        for sub in sub {
+            let mut state_compiler = StateOpsCompiler::new(sub, &mut self.state_mapping);
+            if sub.is_some() {
+                let cnames = format!("{}_for_{}", name.last().unwrap().unwrap_identifier(), sub.unwrap().1);
                 let mut cname = Vec::from(name);
                 cname.last_mut().unwrap().t = TokenData::Identifier(cnames.as_str());
                 super::get_varpath_idx(None, &cname, &mut self.task_mapping)?;
-                let preconditions = if let Some(p) = preconditions { p.accept(&mut state_compiler)? } else { vec![Operation::Push(OperandType::B(true))] };
-                let effects = if let Some(e) = effects { e.accept(&mut state_compiler)? } else { Vec::new() };
-                let cost = if let Some(cost) = cost { cost.accept(&mut state_compiler)?} else { vec![Operation::Push(OperandType::I(0))]};
-
-                let planning = if let Some(p) = planning { p.accept(self)?; std::mem::take(&mut self.operations) } else { Vec::new() };
-                let old = self.has_visited_task;
-                self.has_visited_task = true;
-                body.accept(self)?;
-                self.has_visited_task = old;
-                if self.methods.len() > 0 {
-                    if self.operations.len() > 0 {
-                        return Err(body.to_err("Can not use subtasks and operator calls in the same task."))
-                    } else {
-                        let body = TaskBody::Composite(std::mem::take(&mut self.methods));
-                        self.tasks.push(Task{ preconditions, cost, body, effects, planning});
-                    }
-                } else {
-                    let body = TaskBody::Primitive(std::mem::take(&mut self.operations));
-                    if self.has_visited_task {
-                        self.methods.push(Task{ preconditions, cost, body, effects, planning})
-                    } else {
-                        self.tasks.push(Task{ preconditions, cost, body, effects, planning});
-                    }
-                }
+            } else {
+                super::get_varpath_idx(None, name, &mut self.task_mapping)?;
             }
-        } else {
-            let mut state_compiler = StateOpsCompiler::new(None, &mut self.state_mapping);
-            super::get_varpath_idx(None, name, &mut self.task_mapping)?;
+            
             let preconditions = if let Some(p) = preconditions { p.accept(&mut state_compiler)? } else { vec![Operation::Push(OperandType::B(true))] };
             let effects = if let Some(e) = effects { e.accept(&mut state_compiler)? } else { Vec::new() };
             let cost = if let Some(cost) = cost { cost.accept(&mut state_compiler)?} else { vec![Operation::Push(OperandType::I(0))]};
@@ -93,10 +74,11 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
             self.has_visited_task = old;
             if self.methods.len() > 0 {
                 if self.operations.len() > 0 {
-                    return Err(body.to_err("Can not use subtasks and operator calls in the same task."))
+                    Err(body.to_err("Can not use subtasks and operator calls in the same task."))
                 } else {
                     let body = TaskBody::Composite(std::mem::take(&mut self.methods));
                     self.tasks.push(Task{ preconditions, cost, body, effects, planning});
+                    Ok(())
                 }
             } else {
                 let body = TaskBody::Primitive(std::mem::take(&mut self.operations));
@@ -105,7 +87,8 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
                 } else {
                     self.tasks.push(Task{ preconditions, cost, body, effects, planning});
                 }
-            }
+                Ok(())
+            }?;
         }
         Ok(())
     }

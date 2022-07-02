@@ -5,7 +5,7 @@ use std::fmt;
 
 pub trait StatementVisitor<'a, T, E> {
     fn visit_task_declaration(&mut self, name:&[Token<'a>]) -> Result<T, E>;
-    fn visit_task(&mut self, name:&[Token<'a>], preconditions:Option<&Expr<'a>>, cost:Option<&Expr<'a>>, binding:Option<(&str, &str)>, body:&Stmt<'a>, effects:Option<&Stmt<'a>>, planning:Option<&Stmt<'a>>) -> Result<T, E>;
+    fn visit_task(&mut self, name:&[Token<'a>], preconditions:Option<&Expr<'a>>, cost:Option<&Expr<'a>>, binding:Option<(&'a str, &'a str)>, body:&Stmt<'a>, effects:Option<&Stmt<'a>>, planning:Option<&Stmt<'a>>) -> Result<T, E>;
     fn visit_block(&mut self, block:&[Stmt<'a>]) -> Result<T, E>;
     fn visit_expression(&mut self, expr:&Expr<'a>) -> Result<T, E>;
     fn visit_include(&mut self, filepath:&Token<'a>) -> Result<T, E>;
