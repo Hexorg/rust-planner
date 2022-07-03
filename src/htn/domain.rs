@@ -1,9 +1,7 @@
-use std::collections::HashSet;
-use std::mem;
 use std::{fs, fmt::Debug,  collections::HashMap};
 
 // use super::optimization::{self, Inertia};
-use super::compiler::{Operation, self};
+use super::compiler::{Task, self};
 use super::parser::Parser;
 use super::parser;
 
@@ -19,22 +17,7 @@ pub enum HeuristicAlgorithm {
     None
 }
 
-#[derive(Debug, PartialEq)]
-pub enum TaskBody {
-    Primitive(Vec<Operation>),
-    Composite(Vec<Task>)
-}
 
-#[derive(Debug, PartialEq)]
-pub struct Task {
-    pub preconditions: Vec<Operation>,
-    pub cost: Vec<Operation>,
-    pub body: TaskBody,
-    pub effects: Vec<Operation>,
-    pub planning: Vec<Operation>,
-    // wants: HashMap<usize, Inertia>,
-    // provides: HashMap<usize, Inertia>,
-}
 
 
 /// Structure that holds parsed out AST as well as optimization data

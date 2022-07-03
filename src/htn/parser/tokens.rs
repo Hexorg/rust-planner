@@ -1,5 +1,5 @@
 use super::Error;
-use std::{fmt, ops::Deref};
+use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Literal<'a> {
@@ -86,7 +86,6 @@ impl fmt::Display for TokenData<'_> {
         use TokenData::*;
         match self {
             Task => write!(f, "TASK"),
-            Method => write!(f, "METHOD"),
             Else => write!(f, "ELSE"),
             Effects => write!(f, "EFFECTS"),
             Pass => write!(f, "PASS"),

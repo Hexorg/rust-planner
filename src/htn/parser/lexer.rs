@@ -1,9 +1,9 @@
 use std::iter::Peekable;
 use std::str::CharIndices;
 
-use super::tokens::{Token, TokenData::{self, *}, Literal};
+use super::tokens::{Token, TokenData, Literal};
 use super::Error;
-
+use TokenData::*;
 #[derive(Debug, PartialEq)]
 enum DepthSeparator {
     TABS,
@@ -37,6 +37,7 @@ impl<'a> Lexer<'a> {
 }
 
 impl<'a> Iterator for Lexer<'a> {
+    
     type Item = Result<Token<'a>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {

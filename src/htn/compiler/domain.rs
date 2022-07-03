@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::htn::{parser::{expression::{Expr, ExpressionVisitor}, statement::{Stmt, StatementVisitor}}, domain::{Task, TaskBody}};
+use crate::htn::parser::{expression::{Expr, ExpressionVisitor}, statement::{Stmt, StatementVisitor}};
 
-use super::{*, state_ops::StateOpsCompiler};
+use super::{*, state_ops::StateOpsCompiler, optimization::{Inertia, build_provides, build_wants}};
 
 pub struct DomainCompiler<'a, 'b> {
     compiler: StateOpsCompiler<'a, 'b>,
@@ -64,7 +64,15 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
             }
             
             let preconditions = if let Some(p) = preconditions { p.accept(&mut state_compiler)? } else { vec![Operation::Push(OperandType::B(true))] };
+            let wants = match build_wants(&preconditions) {
+                Ok(w) => w,
+                Err(e) => {return Err(name[0].to_err(&e.message))}
+            };
             let effects = if let Some(e) = effects { e.accept(&mut state_compiler)? } else { Vec::new() };
+            let provides = match build_provides(&effects, &wants) {
+                Ok(p) => p,
+                Err(e) => {return Err(name[0].to_err(&e.message))}
+            };
             let cost = if let Some(cost) = cost { cost.accept(&mut state_compiler)?} else { vec![Operation::Push(OperandType::I(0))]};
 
             let planning = if let Some(p) = planning { p.accept(self)?; std::mem::take(&mut self.operations) } else { Vec::new() };
@@ -77,15 +85,15 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
                     Err(body.to_err("Can not use subtasks and operator calls in the same task."))
                 } else {
                     let body = TaskBody::Composite(std::mem::take(&mut self.methods));
-                    self.tasks.push(Task{ preconditions, cost, body, effects, planning});
+                    self.tasks.push(Task{ preconditions, cost, body, effects, planning, wants, provides});
                     Ok(())
                 }
             } else {
                 let body = TaskBody::Primitive(std::mem::take(&mut self.operations));
                 if self.has_visited_task {
-                    self.methods.push(Task{ preconditions, cost, body, effects, planning})
+                    self.methods.push(Task{ preconditions, cost, body, effects, planning, wants, provides})
                 } else {
-                    self.tasks.push(Task{ preconditions, cost, body, effects, planning});
+                    self.tasks.push(Task{ preconditions, cost, body, effects, planning, wants, provides});
                 }
                 Ok(())
             }?;
@@ -186,11 +194,11 @@ impl<'a, 'b> ExpressionVisitor<'b, Vec<Operation>, Error> for DomainCompiler<'a,
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, hash::Hash, iter::FromIterator};
+    use std::collections::HashMap;
 
-    use crate::htn::{domain::{Task, TaskBody}, parser::{Parser, statement::Stmt}, compiler::Operation};
+    use crate::htn::parser::Parser;
 
-    use super::{Operation::*, OperandType::*, DomainCompiler };
+    use super::{Operation::*, OperandType::*, DomainCompiler, Task, TaskBody, Inertia};
     #[test]
     fn test_basic() {
         let code = "task test(t < 5) cost t:\n\tt = op()\nplanning:\n\tpop(r)\neffects:\n\tt = 2";
@@ -215,7 +223,9 @@ mod tests {
                 cost: vec![ReadState(0)], 
                 body: TaskBody::Primitive(vec![CallOperator(1, 0), WriteBlackboard(1)]), 
                 effects: vec![Push(I(2)), WriteState(0)], 
-                planning: vec![ReadBlackboard(0), CallOperator(0, 1)] 
+                planning: vec![ReadBlackboard(0), CallOperator(0, 1)],
+                wants: HashMap::from([(0, Inertia::Smaller(I(5)))]),
+                provides: HashMap::from([(0, Inertia::Item(I(2)))]),
             }])
         } else {
             assert!(false); // Parser failed.

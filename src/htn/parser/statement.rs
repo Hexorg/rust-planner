@@ -1,6 +1,4 @@
-use super::Error;
-use super::tokens::{Token, TokenData, Literal};
-use super::expression::Expr;
+use super::{Error, tokens::Token, expression::Expr};
 use std::fmt;
 
 pub trait StatementVisitor<'a, T, E> {
@@ -70,6 +68,10 @@ impl StatementVisitor<'_, (), std::fmt::Error> for StmtFormatter<'_, '_> {
         cost.and_then(|c| Some(write!(self.f, " cost {}", c))).unwrap_or(Ok(()))?;
         write!(self.f, ":")?;
         body.accept(self)?;
+        if let Some(planning) = planning {
+            write!(self.f, "{:>depth$}planning:", "", depth=self.depth)?;
+            planning.accept(self)?;
+        }
         if let Some(effects) = effects {
             write!(self.f, "{:>depth$}effects:", "", depth=self.depth)?;
             effects.accept(self)?;

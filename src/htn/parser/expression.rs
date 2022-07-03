@@ -105,7 +105,6 @@ impl<'a> Expr<'a> {
             Expr::Assignment(var_path, left) => visitor.visit_assignment_expr(var_path, left),
             Expr::Call(token, args) => visitor.visit_call_expr(token, args),
             Expr::Nop(token) => visitor.visit_nop_expr(token),
-            _ => panic!("Unexpected expression structure. Mut be a bug in code by this point.")
         }
     }
 

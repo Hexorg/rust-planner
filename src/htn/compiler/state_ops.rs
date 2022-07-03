@@ -35,7 +35,7 @@ impl<'a, 'b> StatementVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'a
         Err(name[0].to_err("Can not use task statement in this context."))
     }
 
-    fn visit_task(&mut self, name:&[Token], preconditions:Option<&Expr>, cost:Option<&Expr>, binding:Option<(&str, &str)>, body:&Stmt, effects:Option<&Stmt>, planning:Option<&Stmt>) -> Result<Vec<Operation>, Error> {
+    fn visit_task(&mut self, name:&[Token], _preconditions:Option<&Expr>, _cost:Option<&Expr>, _binding:Option<(&str, &str)>, _body:&Stmt, _effects:Option<&Stmt>, _planning:Option<&Stmt>) -> Result<Vec<Operation>, Error> {
         Err(name[0].to_err("Can not use task statement in this context."))
     }
 
@@ -55,7 +55,7 @@ impl<'a, 'b> StatementVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'a
         Err(filepath.to_err("Can not use include statement in this context."))
     }
 
-    fn visit_type(&mut self, class:&Token, body:&Stmt) -> Result<Vec<Operation>, Error> {
+    fn visit_type(&mut self, class:&Token, _body:&Stmt) -> Result<Vec<Operation>, Error> {
         Err(class.to_err("Can not use type statement in this context."))
     }
 }
@@ -97,6 +97,7 @@ impl<'a, 'b> ExpressionVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'
     }
 
     fn visit_unary_expr(&mut self, token: &Token, right: &Expr<'a>) -> Result<Vec<Operation>, Error> {
+        use TokenData::*;
         match token.t {
             Not => {let mut bytecode = right.accept(self)?; bytecode.push(Operation::Not); Ok(bytecode)}
             _ => Err(token.to_err("Unsupported unary operation.").into())
@@ -110,7 +111,7 @@ impl<'a, 'b> ExpressionVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'
         Ok(expr)
     }
 
-    fn visit_call_expr(&mut self, target: &Token, args:&[Expr]) -> Result<Vec<Operation>, Error> {
+    fn visit_call_expr(&mut self, target: &Token, _args:&[Expr]) -> Result<Vec<Operation>, Error> {
         Err(target.to_err("Can not call in this context."))
     }
 
@@ -121,7 +122,7 @@ impl<'a, 'b> ExpressionVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, hash::Hash, iter::FromIterator};
+    use std::collections::HashMap;
 
     use crate::htn::parser::{Parser, statement::Stmt};
 
