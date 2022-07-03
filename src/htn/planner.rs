@@ -2,7 +2,7 @@ use std::{fmt, collections::HashMap, cmp::Reverse};
 
 
 use priority_queue::PriorityQueue;
-use super::{domain::{Domain, Operation, Task, ComplexTask, PrimitiveTask, HeuristicAlgorithm}, search::{Node, a_star}, vm::State};
+use super::{domain::Domain, compiler::Operation, search::{Node, a_star}, vm::State};
 
 #[derive(Debug)]
 pub struct Error(String);
@@ -60,7 +60,7 @@ pub struct Planner {
 
 impl Planner {
     pub fn new_state(&self) -> State { 
-        State::new(self.domain.get_state_mapping().len())
+        State::new(self.domain.get_state_mapping())
     }
     #[allow(dead_code)]
     pub fn set_cost(&mut self, task_id:usize, cost:f32) {

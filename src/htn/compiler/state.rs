@@ -1,30 +1,58 @@
 
-use std::collections::HashMap;
+use std::{collections::HashMap};
 
-use super::{domain::{Operation, OperandType}, optimization::Inertia};
+use super::{Operation, OperandType, optimization::Inertia};
 
-#[derive(Clone, Debug, std::hash::Hash, std::cmp::PartialEq, std::cmp::PartialOrd, std::cmp::Eq)]
-pub struct State(Vec<OperandType>);
+#[derive(Debug, Eq)]
+pub struct State<'a>{
+    mapping: &'a HashMap<String, usize>,
+    data: Vec<OperandType>,
+}
 
-impl State {
-    pub fn new(capacity:usize) -> Self {
-        Self(vec![OperandType::default(); capacity])
+impl std::hash::Hash for State<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.data.hash(state);
+    }
+}
+
+impl std::cmp::PartialEq for State<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.mapping, other.mapping) && self.data == other.data
+    }
+}
+
+impl std::cmp::PartialOrd for State<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if !std::ptr::eq(self.mapping, other.mapping) {
+            return None
+        }
+        self.data.partial_cmp(&other.data)
+    }
+}
+
+impl<'a> State<'a> {
+    pub fn new(mapping:&'a HashMap<String, usize>) -> Self {
+        let capacity = mapping.len();
+        Self{
+            mapping,
+            data: vec![OperandType::default(); capacity]
+        }
     }
     #[inline]
-    pub fn get(&self, key:usize) -> OperandType {
-        self.0[key]
+    pub fn get(&self, key:&str) -> OperandType {
+        self.data[self.mapping[key]]
     }
     #[inline]
-    pub fn set(&mut self, key:usize, value:OperandType) {
-        self.0[key] = value
+    pub fn set(&mut self, key:&str, value:OperandType) {
+        self.data[self.mapping[key]] = value
     }
 
     pub fn eval(&mut self, bytecode:&Vec<Operation>) -> Option<OperandType> {
         let mut stack = Vec::new();
         for op in bytecode {
             match op {
-                Operation::ReadState(idx) => stack.push(self.0[*idx]),
-                Operation::WriteState(idx) => self.0[*idx] = stack.pop().unwrap(),
+                Operation::ReadState(idx) => stack.push(self.data[*idx]),
+                Operation::WriteState(idx) => self.data[*idx] = stack.pop().unwrap(),
                 Operation::Push(v) => stack.push(*v),
                 Operation::Equals => {
                     let right = stack.pop().unwrap();
@@ -88,39 +116,39 @@ impl State {
             match v {
                 Inertia::Item(lit) |
                 Inertia::GreaterOrEquals(lit) |
-                Inertia::SmallerOrEquals(lit) => self.set(*k, *lit),
+                Inertia::SmallerOrEquals(lit) => self.data[*k] = *lit,
                 Inertia::NotItem(lit) => match lit {
-                    OperandType::I(i) => self.set(*k, OperandType::I(i+1)),
-                    OperandType::F(f) => self.set(*k, OperandType::F(f+1.0)),
-                    OperandType::B(b) => self.set(*k, OperandType::B(!b)),
+                    OperandType::I(i) => self.data[*k] = OperandType::I(i+1),
+                    OperandType::F(f) => self.data[*k] = OperandType::F(f+1.0),
+                    OperandType::B(b) => self.data[*k] = OperandType::B(!b),
                 },
                 Inertia::Greater(lit) => match lit {
-                    OperandType::I(i) => self.set(*k, OperandType::I(i+1)),
-                    OperandType::F(f) => self.set(*k, OperandType::F(f+1.0)),
-                    OperandType::B(_) => self.set(*k, OperandType::B(true)),
+                    OperandType::I(i) => self.data[*k] = OperandType::I(i+1),
+                    OperandType::F(f) => self.data[*k] = OperandType::F(f+1.0),
+                    OperandType::B(_) => self.data[*k] = OperandType::B(true),
                 },
                 Inertia::Smaller(lit) => match lit {
-                    OperandType::I(i) => self.set(*k, OperandType::I(i-1)),
-                    OperandType::F(f) => self.set(*k, OperandType::F(f-1.0)),
-                    OperandType::B(_) => self.set(*k, OperandType::B(false)),
+                    OperandType::I(i) => self.data[*k] = OperandType::I(i-1),
+                    OperandType::F(f) => self.data[*k] = OperandType::F(f-1.0),
+                    OperandType::B(_) => self.data[*k] = OperandType::B(false),
                 }
                 Inertia::Depends(op, idx) => match op {
-                    Operation::Equals => self.set(*k, self.get(idx.unwrap())),
-                    Operation::Greater => self.set(*k, match self.get(idx.unwrap()) {
+                    Operation::Equals => self.data[*k] = self.data[idx.unwrap()],
+                    Operation::Greater => self.data[*k] = match self.data[idx.unwrap()] {
                         OperandType::I(i) => OperandType::I(i+1),
                         OperandType::F(f) => OperandType::F(f+1.0),
                         OperandType::B(_) => OperandType::B(true),
-                    }),
-                    Operation::Smaller => self.set(*k, match self.get(idx.unwrap()) {
+                    },
+                    Operation::Smaller => self.data[*k] = match self.data[idx.unwrap()] {
                         OperandType::I(i) => OperandType::I(i-1),
                         OperandType::F(f) => OperandType::F(f-1.0),
                         OperandType::B(_) => OperandType::B(false),
-                    }),
-                    Operation::GreaterOrEquals => self.set(*k, self.get(idx.unwrap())),
-                    Operation::SmallerOrEquals => self.set(*k, self.get(idx.unwrap())),
-                    Operation::Not => self.set(*k, !self.get(idx.unwrap())),
+                    },
+                    Operation::GreaterOrEquals => self.data[*k] = self.data[idx.unwrap()],
+                    Operation::SmallerOrEquals => self.data[*k] = self.data[idx.unwrap()],
+                    Operation::Not => self.data[*k] = !self.data[idx.unwrap()],
                     Operation::And => todo!(),
-                    Operation::Or => self.set(*k, self.get(idx.unwrap())),
+                    Operation::Or => self.data[*k] = self.data[idx.unwrap()],
                     Operation::Subtract => todo!(),
                     Operation::Add => todo!(),
                     Operation::Multiply => todo!(),
@@ -136,8 +164,8 @@ impl State {
 
     pub fn manhattan_distance(&self, other:&State) -> i32 {
         let mut distance = 0;
-        for i in 0..self.0.len() {
-            distance += match (self.get(i), other.get(i)) {
+        for i in 0..self.data.len() {
+            distance += match (self.data[i], other.data[i]) {
                 (OperandType::I(l), OperandType::I(r)) => (l-r).abs(),
                 (OperandType::I(i), OperandType::F(f)) |
                 (OperandType::F(f), OperandType::I(i)) => 10*(i - f.floor() as i32).abs(),
@@ -154,39 +182,5 @@ impl State {
     }
 }
 
-
-
-
-
-// impl std::convert::Into<i32> for OperandType {
-//     fn into(self) -> i32 {
-//         match self {
-//             OperandType::I(i) => i,
-//             OperandType::B(b) => if b { 1 } else { 0 },
-//             OperandType::F(f) => if f.is_normal() { unsafe { f.to_int_unchecked() } } else { i32::MAX },
-//         }
-//     }
-// }
-
-// impl std::convert::Into<bool> for OperandType {
-//     fn into(self) -> bool {
-//         match self {
-//             OperandType::I(i) => i == 1,
-//             OperandType::B(b) => b,
-//             _ => panic!("Can not convert f32 to bool")
-//         }
-//     }
-// }
-
-
-// impl std::fmt::Display for OperandType {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             OperandType::I(i) => write!(f, "{}", i),
-//             OperandType::B(b) => write!(f, "{}", b),
-//             OperandType::F(d) => write!(f, "{}", d),
-//         }
-//     }
-// }
 
 

@@ -1,3 +1,4 @@
+use std::hash::Hash;
 use std::{fs, fmt::Debug,  collections::HashMap};
 
 // use super::optimization::{self, Inertia};
@@ -6,25 +7,11 @@ use super::parser::Parser;
 use super::parser;
 
 
-pub enum NeighborDetectionAlgorithm {
-    Inertia,
-    VariableSetIntersection,
-    FullyLinked,
-}
-
-pub enum HeuristicAlgorithm {
-    ManhattanDistance,
-    None
-}
-
-
-
-
 /// Structure that holds parsed out AST as well as optimization data
 pub struct Domain {
     pub filepath: String,
-    pub tasks: Vec<Task>,
-    // pub neighbors: HashMap<usize, Vec<usize>>,
+    tasks: Vec<Task>,
+    neighbors: HashMap<usize, Vec<usize>>,
     main_id: usize,   
     state_mapping: HashMap<String, usize>,
     blackboard_mapping: HashMap<String, usize>,
@@ -109,10 +96,10 @@ impl std::error::Error for Error { }
 impl std::fmt::Debug for Domain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Domain({}):", self.filepath)?;
-        // writeln!(f, "State mapping: {:?}", self.compiler.state_mapping)?;
-        // let total_links = self.neighbors.values().fold(0, |acc, item| acc + item.len());
-        // writeln!(f, "Total links: {}", total_links)?;
-        // writeln!(f, "Task neighbors: {:?}", self.neighbors)?;
+        writeln!(f, "State mapping: {:?}", self.state_mapping)?;
+        let total_links = self.neighbors.values().fold(0, |acc, item| acc + item.len());
+        writeln!(f, "Total links: {}", total_links)?;
+        writeln!(f, "Task neighbors: {:?}", self.neighbors)?;
         writeln!(f, "Tasks:")?;
         for (id, task) in self.tasks.iter().enumerate() {
             writeln!(f, "{}: {:?}", id, task)?;
@@ -146,75 +133,42 @@ impl Domain {
     //     }
     // }
 
-    // /// Figure out which tasks can follow what, by checking which tasks effects provide wants
-    // /// that other tasks' preconditions want.
-    // fn build_neighbor_map_based_on_inertia(&mut self) {
-    //     for (i, x) in self.tasks.iter().enumerate() {
-    //         let x_provides = x.get_provides();
+    /// Figure out which tasks can follow what, by checking which tasks effects provide wants
+    /// that other tasks' preconditions want.
+    fn build_neighbor_map_based_on_inertia(tasks: &Vec<Task>) -> HashMap<usize, Vec<usize>> {
+        let mut result = HashMap::new();
+        for (i, x) in tasks.iter().enumerate() {
+            let x_provides = x.provides();
 
-    //         let mut to_vec = Vec::new();
-    //         for (iy, y) in self.tasks.iter().enumerate() {
-    //             if iy != i {
-    //                 let y_wants = y.get_wants();
-    //                 let mut should_add = true;
-    //                 for (xid, provides) in x_provides {
-    //                     if y_wants.contains_key(xid) {
-    //                         if y_wants.get(xid).unwrap().satisfies(provides) {
-    //                             should_add = true
-    //                         } else {
-    //                             should_add = false;
-    //                             break
-    //                         }
-    //                     }
-    //                 }
-    //                 if should_add {
-    //                     to_vec.push(iy);
-    //                 }
-    //             }
-    //         }
-    //         self.neighbors.insert(i, to_vec);
-    //     }
-    // }
+            let mut to_vec = Vec::new();
+            for (iy, y) in tasks.iter().enumerate() {
+                if iy != i {
+                    let y_wants = y.wants();
+                    let mut should_add = true;
+                    for (xid, provides) in x_provides {
+                        if y_wants.contains_key(xid) {
+                            if y_wants.get(xid).unwrap().satisfies(provides) {
+                                should_add = true
+                            } else {
+                                should_add = false;
+                                break
+                            }
+                        }
+                    }
+                    if should_add {
+                        to_vec.push(iy);
+                    }
+                }
+            }
+            result.insert(i, to_vec);
+        }
+        result
+    }
 
-    // fn compile(&mut self, filepath:&str, is_include:bool) -> Result<(), Error> {
-    //     let content = fs::read_to_string(filepath)?;
-    //     let current_pass_count = self.pass_count;
-    //     self.pass_count = 0;
-    //     for stmt in Parser::new(content.as_str()) {
-    //         stmt?.accept(self)?
-    //     }
-    //     self.pass_count = 1;
-    //     for stmt in Parser::new(content.as_str()) {
-    //         stmt?.accept(self)?
-    //     }
-    //     self.pass_count = current_pass_count;
-    //     if !is_include && self.main_id.is_none() {
-    //         Err(Error::Domain(filepath.to_owned(), "Main task not found.".to_string()))
-    //     } else {
-    //         Ok(())
-    //     }
-    // }
+    pub fn main(&self) -> &Task {
+        &self.tasks[self.main_id]
+    }
 
-    // pub fn get_main_id(&self) -> usize {
-    //     // check in compile ensures this never fails.
-    //     self.main_id.unwrap()
-    // }
-
-    // pub fn get_state_mapping(&self) -> &HashMap<String, usize> {
-    //     &self.compiler.state_mapping
-    // }
-
-    // pub fn get_operator_mapping(&self) -> Vec<&String> {
-    //     let mut container: Vec<_> = self.compiler.operator_mapping.keys().collect();
-    //     container.sort_by_key(|a| self.compiler.operator_mapping.get(*a).unwrap());
-    //     container
-    // }
-
-    // pub fn get_blackboard_mapping(&self) -> Vec<&String> {
-    //     let mut container: Vec<_> = self.compiler.blackboard_mapping.keys().collect();
-    //     container.sort_by_key(|a| self.compiler.blackboard_mapping.get(*a).unwrap());
-    //     container
-    // }
        
     pub fn from_file(filepath:&str, type_counts:HashMap<&str, Vec<&str>>) -> Result<Domain, Error> {   
         // let mut type_mapping = HashMap::<String, Vec<String>>::new();
@@ -244,7 +198,8 @@ impl Domain {
                     let tasks = compiler.finish();
                     if task_mapping.contains_key("Main") {
                         let main_id = task_mapping["Main"];
-                        Ok(Domain{filepath:filepath.to_owned(), tasks, main_id, state_mapping, blackboard_mapping, task_mapping, operator_mapping})
+                        let neighbors = Domain::build_neighbor_map_based_on_inertia(&tasks);
+                        Ok(Domain{filepath:filepath.to_owned(), tasks, main_id, state_mapping, blackboard_mapping, task_mapping, operator_mapping, neighbors})
                     } else {
                         Err(Error::Basic(filepath.to_owned(), "Main task not declared.".to_owned()))
                     }

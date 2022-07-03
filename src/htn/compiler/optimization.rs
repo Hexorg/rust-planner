@@ -319,7 +319,7 @@ pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inert
     use Operation::*;
     // println!("Preconditions {:?}", preconditions);
     for op in preconditions.iter().rev() {
-        println!("{:?} in {:?}", op, inertias);
+        // println!("{:?} in {:?}", op, inertias);
         match op {
             And => { let last = inertias.last().unwrap().clone(); inertias.push(last)},
             Or => { let last = inertias.pop().unwrap(); match last {

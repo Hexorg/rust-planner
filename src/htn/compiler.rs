@@ -193,6 +193,16 @@ pub struct Task {
     provides: HashMap<usize, optimization::Inertia>,
 }
 
+impl Task {
+    pub fn wants(&self) -> &HashMap<usize, optimization::Inertia> {
+        &self.wants
+    }
+
+    pub fn provides(&self) -> &HashMap<usize, optimization::Inertia> {
+        &self.provides
+    }
+}
+
 #[inline]
 fn get_varpath_idx(substitution:Option<(&str, &str)>, var_path:&[Token], mapping:&mut HashMap<String, usize>) -> Result<usize, Error> {
     let mut iter = var_path.iter();
@@ -219,4 +229,5 @@ fn get_varpath_idx(substitution:Option<(&str, &str)>, var_path:&[Token], mapping
 
 mod state_ops;
 mod optimization;
+mod state;
 pub mod domain;
