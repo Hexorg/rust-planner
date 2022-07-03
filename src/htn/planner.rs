@@ -2,7 +2,7 @@ use std::{fmt, collections::HashMap, cmp::Reverse};
 
 
 use priority_queue::PriorityQueue;
-use super::{domain::Domain, compiler::Operation, search::{Node, a_star}, vm::State};
+use super::{domain::Domain, compiler::{state::State, Operation, OperandType, Task, TaskBody}, search::{Node, a_star}};
 
 #[derive(Debug)]
 pub struct Error(String);
@@ -60,22 +60,19 @@ pub struct Planner {
 
 impl Planner {
     pub fn new_state(&self) -> State { 
-        State::new(self.domain.get_state_mapping())
+        State::new(self.domain.state_mapping())
     }
     #[allow(dead_code)]
     pub fn set_cost(&mut self, task_id:usize, cost:f32) {
         self.task_duration.insert(task_id, cost);
     }
-    pub fn get_task_and_cost(&self, task_id:usize) -> (&Task, i32) {
-
-        let cost =  match self.domain.tasks[task_id] {
-            Task::Complex(ComplexTask{cost,..})|
-            Task::Primitive(PrimitiveTask{cost,..}) => cost,
-        };
+    pub fn get_task_and_cost(&self, state: &State, task_id:usize) -> (&Task, i32) {
+        let task = &self.domain.tasks()[task_id];
+        let cost = if let OperandType::I(v) = state.eval(&task.cost).unwrap() { v } else { 0 };
         // println!("{} cost is {:?}", stmt.name()?, stmt.cost()?);
         let time = self.task_duration.get(&task_id).unwrap_or(&1.0);
         let r = cost + (10.0*time) as i32;
-        (&self.domain.tasks[task_id], r)
+        (task, r)
     }
 
     fn add_primitive_task_operators(&self, plan:&mut Plan, state:&mut State, stats:&mut Statistics, body:&Vec<Operation>) -> Result<bool, Error> {
@@ -94,59 +91,45 @@ impl Planner {
 
 
     fn run_astar(&self, plan:&mut Plan, state:&mut State, stats:&mut Statistics, task_id:usize) -> Result<bool, Error> {
-        if plan.0.len() > 40 && task_id == self.domain.get_main_id() {
+        if plan.0.len() > 40 && task_id == self.domain.main_id() {
             return Ok(true)
         }
-        let task = self.domain.tasks.get(task_id).unwrap();
+        let task = &self.domain.tasks()[task_id];
         let mut goal_state = state.clone();
-        goal_state.admit(task.get_wants());
-        let heuristic = |node:&Node| match self.domain.config.heuristic_algorithm {
-            HeuristicAlgorithm::ManhattanDistance => node.state.manhattan_distance(&goal_state),
-            HeuristicAlgorithm::None => 4,
-        };
-        match task {
-            Task::Complex(ComplexTask { preconditions, cost, body, effects,.. }) => {
-                if let Some((task_plan, _task_plan_cost)) = a_star(Node::new(state, usize::MAX), preconditions, heuristic, self, stats) {
-                    for subtask in task_plan {
-                        self.run_astar(plan, state, stats, subtask)?;
-                    }
-
+        goal_state.admit(task.wants());
+        let heuristic = |node:&Node| node.state.manhattan_distance(&goal_state);
+ 
+        if let Some((task_plan, _task_plan_cost)) = a_star(Node::new(state, usize::MAX), &task.preconditions, heuristic, self, stats) {
+            for subtask in task_plan {
+                self.run_astar(plan, state, stats, subtask)?;
+            }
+            match &task.body {
+                TaskBody::Primitive(ops) => {let r = self.add_primitive_task_operators(plan, state, stats, ops);
+                    state.eval(&task.effects);
+                    r},
+                TaskBody::Composite(methods) => {
                     let mut method_plans = PriorityQueue::new();
-                    for (method_id, method) in body.iter().enumerate() {
+                    for (method_id, method) in methods.iter().enumerate() {
                         if let Some((mut method_plan, method_plan_cost)) = a_star(Node::new(state, usize::MAX), &method.preconditions, heuristic, self, stats) {
                             method_plan.push(method_id);
+                            let cost = if let OperandType::I(v) = state.eval(&method.cost).unwrap() { v } else { 0 };
                             method_plans.push(method_plan, Reverse(method_plan_cost+cost));
                         }
                     }
                     // println!("Method plans: {:?}", method_plans);
                     if let Some((mut method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
-                        let method_id = method_plan.pop().unwrap();
                         for subtask in method_plan {
                             self.run_astar(plan, state, stats, subtask)?;
                         }
-                        let r = self.add_primitive_task_operators(plan, state, stats, &body[method_id].body);
-                        state.eval(effects);
-                        r
+                        Ok(true)
                     } else {
                         // No reachable methods
                         Ok(false)
                     }
-                } else {
-                    Ok(false)
                 }
-            },
-            Task::Primitive(PrimitiveTask { preconditions, body, effects,..}) => {
-                if let Some((task_plan, _task_plan_cost)) = a_star(Node::new(state, usize::MAX), preconditions, heuristic, self, stats) {
-                    for subtask in task_plan {
-                        self.run_astar(plan, state, stats, subtask)?;
-                    }
-                    let r = self.add_primitive_task_operators(plan, state, stats, body);
-                    state.eval(effects);
-                    r
-                } else {
-                    Ok(false)
-                }
-            },
+            }
+        } else {
+            Ok(false)
         }
     }
 
@@ -159,7 +142,7 @@ impl Planner {
         let mut state = state.clone();
         let mut stats = Statistics::new();
         println!("Running planning...");
-        self.run_astar(&mut plan, &mut state, &mut stats, self.domain.get_main_id())?;
+        self.run_astar(&mut plan, &mut state, &mut stats, self.domain.main_id())?;
         println!("*** Statistics:\n{:?}", stats);
         Ok(plan)
     }

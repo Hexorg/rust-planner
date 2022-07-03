@@ -52,12 +52,14 @@ fn main() {
 
         let plan = planner.plan(&state).unwrap();
         println!("Planer finished successfully. Plan: {:?}\nDecompiled plan:", plan);
+        let blackboard = planner.domain.blackboard_mapping();
+        let operators = planner.domain.operator_mapping();
         let mut stack = Vec::new();
         for op in plan.0 {
             match op {
-                htn::domain::Operation::ReadBlackboard(idx) => stack.push(blackboard[idx]),
-                htn::domain::Operation::WriteBlackboard(idx) => println!("^ -> Store into {}", blackboard[idx]),
-                htn::domain::Operation::CallOperator(idx, arity) => println!("{}({})", operators[idx], {
+                htn::compiler::Operation::ReadBlackboard(idx) => stack.push(blackboard[&idx]),
+                htn::compiler::Operation::WriteBlackboard(idx) => println!("^ -> Store into {}", blackboard[&idx]),
+                htn::compiler::Operation::CallOperator(idx, arity) => println!("{}({})", operators[idx], {
                     let mut i = stack.iter().take(arity);
                     let args = i.by_ref().take(1).fold(String::new(), |acc,item| acc + item);
                     let args = i.fold(args, |acc,item| acc + ", " + item);

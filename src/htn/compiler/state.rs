@@ -9,6 +9,14 @@ pub struct State<'a>{
     data: Vec<OperandType>,
 }
 
+impl std::clone::Clone for State<'_> {
+    fn clone(&self) -> Self {
+        Self { mapping: self.mapping, data: self.data.clone() }
+    }
+}
+
+
+
 impl std::hash::Hash for State<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.data.hash(state);
@@ -47,7 +55,71 @@ impl<'a> State<'a> {
         self.data[self.mapping[key]] = value
     }
 
-    pub fn eval(&mut self, bytecode:&Vec<Operation>) -> Option<OperandType> {
+    pub fn eval(&self, bytecode:&[Operation]) -> Option<OperandType> {
+        let mut stack = Vec::new();
+        for op in bytecode {
+            match op {
+                Operation::ReadState(idx) => stack.push(self.data[*idx]),
+                Operation::WriteState(_) => return None,
+                Operation::Push(v) => stack.push(*v),
+                Operation::Equals => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(OperandType::B(left == right))},
+                Operation::Greater => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(OperandType::B(left > right))},
+                Operation::Smaller => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(OperandType::B(left < right))},
+                Operation::GreaterOrEquals => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(OperandType::B(left >= right))},
+                Operation::SmallerOrEquals => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(OperandType::B(left <= right))},
+                Operation::Not => {
+                    let left = stack.pop().unwrap();
+                    stack.push(!left)},
+                Operation::And => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(left & right)},
+                Operation::Or => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(left | right)},
+                Operation::Subtract => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(left - right)},
+                Operation::Add => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(left + right)},
+                Operation::Multiply => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(left * right)},
+                Operation::Divide => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    stack.push(left / right)},
+                Operation::ReadBlackboard(_) |
+                Operation::WriteBlackboard(_) |
+                Operation::PlanTask(_) |
+                Operation::CallOperator(_, _) |
+                Operation::OrNot => (),
+            }
+        }
+        stack.pop()
+    }
+
+    pub fn eval_mut(&mut self, bytecode:&[Operation]) -> Option<OperandType> {
         let mut stack = Vec::new();
         for op in bytecode {
             match op {

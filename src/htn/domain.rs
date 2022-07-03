@@ -110,29 +110,6 @@ impl std::fmt::Debug for Domain {
 
 
 impl Domain {
-    // fn build_neightbor_map_fully_linked(&mut self) {
-    //     for i in 0..self.tasks.len() {
-    //         self.neighbors.insert(i, (0..self.tasks.len()).collect());
-    //     }
-    // }
-
-    // /// Figure out which tasks can follow what, by checking which tasks effect variables
-    // /// that exist in other tasks' preconditions
-    // fn build_neighbor_map_based_on_variable_intersection(&mut self) {
-    //     for (i, x) in self.tasks.iter().enumerate() {
-    //         let effects = x.get_state_effects();
-    //         let mut to_vec = Vec::new();
-    //         for (iy, y) in self.tasks.iter().enumerate() {
-    //             if iy != i {
-    //                 if effects.intersection(&y.get_state_depends()).count() > 0 {
-    //                     to_vec.push(iy);
-    //                 }
-    //             }
-    //         }
-    //         self.neighbors.insert(i, to_vec);
-    //     }
-    // }
-
     /// Figure out which tasks can follow what, by checking which tasks effects provide wants
     /// that other tasks' preconditions want.
     fn build_neighbor_map_based_on_inertia(tasks: &Vec<Task>) -> HashMap<usize, Vec<usize>> {
@@ -167,6 +144,34 @@ impl Domain {
 
     pub fn main(&self) -> &Task {
         &self.tasks[self.main_id]
+    }
+
+    pub fn main_id(&self) -> usize {
+        self.main_id
+    }
+
+    pub fn tasks(&self) -> &[Task] {
+        &self.tasks
+    }
+
+    pub fn state_mapping(&self) -> &HashMap<String, usize> {
+        &self.state_mapping
+    }
+
+    pub fn task_mapping(&self) -> &HashMap<String, usize> {
+        &self.task_mapping
+    }
+
+    pub fn operator_mapping(&self) -> &HashMap<String, usize> {
+        &self.operator_mapping
+    }
+
+    pub fn blackboard_mapping(&self) -> &HashMap<String, usize> {
+        &self.blackboard_mapping
+    }
+
+    pub fn neighbors(&self) -> &HashMap<usize, Vec<usize>> {
+        &self.neighbors
     }
 
        

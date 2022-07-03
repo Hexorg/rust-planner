@@ -229,5 +229,5 @@ fn get_varpath_idx(substitution:Option<(&str, &str)>, var_path:&[Token], mapping
 
 mod state_ops;
 mod optimization;
-mod state;
+pub mod state;
 pub mod domain;
