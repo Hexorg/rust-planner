@@ -166,8 +166,20 @@ impl Domain {
         &self.operator_mapping
     }
 
+    pub fn operator_vec(&self) -> Vec<String> {
+        let mut operator_vec: Vec<String> = self.operator_mapping.iter().map(|(k,_v)| k.clone()).collect();
+        operator_vec.sort_by(|l,r| self.operator_mapping[l].cmp(&self.operator_mapping[r]));
+        operator_vec
+    }
+
     pub fn blackboard_mapping(&self) -> &HashMap<String, usize> {
         &self.blackboard_mapping
+    }
+
+    pub fn blackboard_vec(&self) -> Vec<String> {
+        let mut blackboard_vec: Vec<String> = self.blackboard_mapping.iter().map(|(k,_v)| k.clone()).collect();
+        blackboard_vec.sort_by(|l,r| self.blackboard_mapping[l].cmp(&self.blackboard_mapping[r]));
+        blackboard_vec
     }
 
     pub fn neighbors(&self) -> &HashMap<usize, Vec<usize>> {
