@@ -1,15 +1,30 @@
 use std::collections::HashMap;
+use std::fmt;
+use super::{Operation, OperandType};
 
-use super::{domain::Operation};
-use super::domain::{self, OperandType};
+#[derive(PartialEq, Debug)]
+pub struct Error {
+    pub message: String,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Inertia Error:{}", self.message)
+    }
+}
+// impl fmt::Debug for Error {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         write!(f, "State variable {}: {}", self.message)
+//     }
+// }
+impl std::error::Error for Error { }
+
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Inertia {
     Item(OperandType),
-    // Items(Vec<OperandType>),
     NotItem(OperandType),
-    // NotItems(Vec<OperandType>),
     Greater(OperandType),
     GreaterOrEquals(OperandType),
     Smaller(OperandType),
@@ -21,7 +36,7 @@ pub enum Inertia {
 }
 
 impl Inertia {
-    fn bool_eval(&self, op:&Operation, arg:OperandType) -> Result<Inertia, domain::Error> {
+    fn bool_eval(&self, op:&Operation, arg:OperandType) -> Result<Inertia, Error> {
         let inertia = match self {
             Self::Item(OperandType::B(v)) => *v,
             Self::NotItem(OperandType::B(v)) => !*v,
@@ -48,7 +63,7 @@ impl Inertia {
             (_, Not) => Inertia::Item(OperandType::B(!inertia)),
             (_, Or) => if arg.is_true() { Inertia::Fluent} else {Inertia::Item(OperandType::B(inertia))},
             _ => todo!("More operations...?")
-            // _ => return Err(domain::Error::Domain(String::new(), "Unexpected operation."))
+            // _ => return Err(Error::Domain(String::new(), "Unexpected operation."))
         })
     }
 
@@ -82,7 +97,7 @@ impl Inertia {
         }
     }
 
-    pub fn intersection(&self, other:&Self, arg:OperandType) -> Result<Inertia, domain::Error> {
+    pub fn intersection(&self, other:&Self, arg:OperandType) -> Result<Inertia, Error> {
         // println!("Getting intersection of {:?} and {:?} Inertia with arg {:?}.", self, other, arg);
         match (self, other) {
             (Inertia::Item(_), Inertia::Item(_)) => todo!(),
@@ -185,7 +200,7 @@ impl Inertia {
             (Inertia::None, Inertia::Fluent) => todo!(),
             (Inertia::None, Inertia::Some) => todo!(),
             (Inertia::None, Inertia::None) => todo!(),
-            _ => Err(domain::Error::Domain(String::new(), format!("Unexpected want combination: {:?} and {:?}.", self, other))),
+            _ => Err(Error{message:format!("Unexpected want combination: {:?} and {:?}.", self, other)}),
         }
     }
     #[allow(unused_variables)]
@@ -240,7 +255,7 @@ impl Inertia {
     }
 }
 
-pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Inertia>) -> Result<HashMap<usize, Inertia>, domain::Error> {
+pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Inertia>) -> Result<HashMap<usize, Inertia>, Error> {
     let mut effects_map = HashMap::new(); //Inertia.clone();
     let mut stack = Vec::new();
     for op in effects {
@@ -297,7 +312,7 @@ pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Inertia>) -
     Ok(effects_map)
 }
 
-pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inertia>, domain::Error> {
+pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inertia>, Error> {
     let mut wants_map = HashMap::new();
     // println!("Building Inertia on {:?}", preconditions);
     let mut inertias = vec![Inertia::Item(OperandType::B(true))];
@@ -311,9 +326,9 @@ pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inert
                 Inertia::Item(OperandType::B(false)) => {inertias.push(Inertia::Depends(Operation::OrNot, None)); inertias.push(Inertia::Depends(Operation::OrNot, None))},
                 Inertia::Item(OperandType::B(true)) => {inertias.push(Inertia::Depends(Operation::Or, None)); inertias.push(Inertia::Depends(Operation::Or, None))},
                 Inertia::Depends(..) => {inertias.push(last.clone()); inertias.push(last);},
-                _ => return Err(domain::Error::Domain(String::new(), format!("'or' can never result in {:?}", last))),
+                _ => return Err(Error{message:format!("'or' can never result in {:?}", last)}),
             }},
-            Equals | Greater => inertias.push(Inertia::Depends(*op, None)),
+            Equals | Greater | Smaller => inertias.push(Inertia::Depends(*op, None)),
             Push(literal) => { 
                 //if 
                 let last_want = inertias.pop().unwrap();
@@ -366,9 +381,6 @@ pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inert
                     Inertia::None => inertias.push(Inertia::Fluent),  
                 }
             }
-            // Greater => {
-
-            // }
             _ => {println!("Unsupported operation: {:?}", op); todo!("Add more operations.")}
         }
     }

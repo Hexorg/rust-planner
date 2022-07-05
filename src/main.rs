@@ -1,11 +1,18 @@
 mod htn;
 use std::collections::HashMap;
 
-// use htn::parser::Literal;
-use htn::domain::{Domain, OperandType};
+use htn::compiler::OperandType::*;
+use htn::domain::Domain;
 use htn::planner::Planner;
-// use htn::interpreter::{State, StateType};
 
+
+
+// fn main() {
+//     match htn::domain::Domain::from_file("htn-problems/testing.htn", HashMap::new()) {
+//         Ok(domain) => println!("{:?}", domain),
+//         Err(e) => println!("{:?}", e),
+//     }
+// }
 
 fn main() {
     let type_map = HashMap::<&str, Vec<&str>>::new();
@@ -21,23 +28,19 @@ fn main() {
 
         print!("{:?}", domain);
         let planner = Planner::new(domain);
-        let vid = planner.domain.get_state_mapping();
-        let operators = planner.domain.get_operator_mapping();
-        let blackboard = planner.domain.get_blackboard_mapping();
         let mut state = planner.new_state();
-        use OperandType::*;
         let mut pos = 2;
         while let Some(key) = args.get(pos) {
             if let Some(value) = args.get(pos + 1) {
                 if value.contains('.') {
                     if let Ok(literal) = value.parse::<f32>() {
-                        state.set(*vid.get(key).expect(&format!("Domain doesn't use state {}", key)), F(literal));
+                        state.set(key, F(literal));
                     } else {eprintln!("Unable to parse initial state {}'s value {}", key, value); return;}
                 } else if let Ok(literal) = value.parse::<i32>() {
-                    state.set(*vid.get(key).expect(&format!("Domain doesn't use state {}", key)), I(literal));
+                    state.set(key, I(literal));
                 } else { match value.as_str() {
-                    "true" => state.set(*vid.get(key).expect(&format!("Domain doesn't use state {}", key)), B(true)),
-                    "false" => state.set(*vid.get(key).expect(&format!("Domain doesn't use state {}", key)), B(false)),
+                    "true" => state.set(key, B(true)),
+                    "false" => state.set(key, B(false)),
                     _ => {eprintln!("Unable to parse initial state {}'s value {}", key, value); return;},
                 }}
             } else {
@@ -49,12 +52,14 @@ fn main() {
 
         let plan = planner.plan(&state).unwrap();
         println!("Planer finished successfully. Plan: {:?}\nDecompiled plan:", plan);
+        let blackboard = planner.domain.blackboard_vec();
+        let operators = planner.domain.operator_vec();
         let mut stack = Vec::new();
         for op in plan.0 {
             match op {
-                htn::domain::Operation::ReadBlackboard(idx) => stack.push(blackboard[idx]),
-                htn::domain::Operation::WriteBlackboard(idx) => println!("^ -> Store into {}", blackboard[idx]),
-                htn::domain::Operation::CallOperator(idx, arity) => println!("{}({})", operators[idx], {
+                htn::compiler::Operation::ReadBlackboard(idx) => stack.push(&blackboard[idx]),
+                htn::compiler::Operation::WriteBlackboard(idx) => println!("^ -> Store into {}", blackboard[idx]),
+                htn::compiler::Operation::CallOperator(idx, arity) => println!("{}({})", operators[idx], {
                     let mut i = stack.iter().take(arity);
                     let args = i.by_ref().take(1).fold(String::new(), |acc,item| acc + item);
                     let args = i.fold(args, |acc,item| acc + ", " + item);
@@ -65,13 +70,6 @@ fn main() {
             }
         }
     }
-    
-    
-    
-    // return;
-    
-    
-
 }
 
 

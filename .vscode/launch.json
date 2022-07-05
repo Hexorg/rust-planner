@@ -9,7 +9,7 @@
             "request": "launch",
             "name": "Debug executable 'htn_planner'",
             "program": "${workspaceRoot}/target/debug/htn_planner",
-            "args": [],
+            "args": ["htn-problems/testing.htn", "left.bottom", "3", "left.middle", "2", "left.top", "1"],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": ["rust"]
         },

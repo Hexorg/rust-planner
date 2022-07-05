@@ -1,207 +1,432 @@
-use super::tokens::{TokenData, Token, Literal};
-use super::Error;
+use std::iter::Peekable;
+use std::str::CharIndices;
 
+use super::tokens::{Token, TokenData, Literal};
+use super::Error;
+use TokenData::*;
+#[derive(Debug, PartialEq)]
 enum DepthSeparator {
     TABS,
     SPACES(usize)
 }
 
-pub struct Lexer { }
+pub struct Lexer<'a> { 
+    text:&'a str,
+    it: Peekable<CharIndices<'a>>,
+    line: usize, // current source line, used for error reporting by Tokens
+    col: usize, // current source column, used for error reporting by Tokens
+    stash: Vec<Token<'a>>, // stash of tokens to return in leu of it.peek_two()
+    is_newline: bool,
+    tab_depth: usize, // needed to insert BLOCK_END tokens properly
+    depth_separator: Option<DepthSeparator>,
+}
 
-impl Lexer {
-    pub fn tokenize(htn_source: &str) -> Result<Vec<Token>, Error> {
-        use TokenData::*;
-        let mut line = 1; // current source line, used for error reporting by Tokens
-        let mut col = 1; // current source column, used for error reporting by Tokens
-        let mut last_block_tab_depth = 0; // needed to insert BLOCK_END tokens properly
-        let mut tab_depth = 0; // For tabs, tab_depth just counts tabs at the beginning of line 
-        // For spaces, tab_depth counts spaces first, then on the first non-whitespace character figures out 
-        // how many spaces are equal to a new block, and divides amount of spaces by however many spaces constitute a new block
-        let mut depth_separator : Option<DepthSeparator> = None;
-        let mut is_comment = false; // ignores the rest of the line
-        let mut is_newline = true; // stays true between \n and first non-whitespace characters to allow for tabs vs spaces detection
-        let mut string_data: Option<String> = None;
-        let mut r = Vec::<Token>::new(); // result
-        let mut it = htn_source.chars().peekable();
-        while let Some(c) = it.next() {
-            if is_comment && c != '\n' {
-                continue;
-            }
-            if let Some(ref mut s) = string_data { 
-                if c == '"' { 
-                    r.push(Token{line, col, len:s.len(), t:Literal(self::Literal::S(s.to_string()))});
-                    string_data = None;
-                } else {
-                    s.push(c);
-                }
-            } else { 
-                match c {
-                    '#' => is_comment = true,
-                    ':' => r.push(Token{line, col, len:1, t:Colon}),
-                    '(' => r.push(Token{line, col, len:1, t:OpenParenthesis}),
-                    ')' => r.push(Token{line, col, len:1, t:CloseParenthesis}),
-                    '=' => r.push(Token{line, col, len:1, t:Equals}),
-                    '-' => r.push(Token{line, col, len:1, t:Minus}),
-                    '+' => r.push(Token{line, col, len:1, t:Plus}),
-                    '/' => r.push(Token{line, col, len:1, t:Slash}),
-                    '*' => r.push(Token{line, col, len:1, t:Star}),
-                    '>' => r.push(Token{line, col, len:1, t:Greater}),
-                    '<' => r.push(Token{line, col, len:1, t:Smaller}),
-                    '!' => r.push(Token{line, col, len:1, t:Not}),
-                    '|' => r.push(Token{line, col, len:1, t:Or}),
-                    '&' => r.push(Token{line, col, len:1, t:And}),
-                    ',' => r.push(Token{line, col, len:1, t:Comma}),
-                    '.' => if let Some(Token{t:Label(label), ..}) = r.last_mut() { 
-                        if let Err(_) = label.parse::<i32>() { r.push(Token{line, col, len:1, t:Dot})} else {
-                            label.push(c);
-                        }
+impl<'a> Lexer<'a> {
+    pub fn new(text:&'a str) -> Self {
+        Self{
+            text,
+            it:text.char_indices().peekable(), 
+            line:1,
+            col:1,
+            stash:Vec::new(),
+            is_newline: true,
+            tab_depth: 0,
+            depth_separator: None,
+        }
+    }
+}
+
+impl<'a> Iterator for Lexer<'a> {
+    
+    type Item = Result<Token<'a>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stash.len() > 0 {
+            Some(Ok(self.stash.pop().unwrap()))
+        } else {
+            if let Some((offset, c)) = self.next_char() {
+                // println!("Consumed up to: line:{} col:{} offset:{} char:{:?}", self.line, self.col, offset, c);
+                let mut new_token = match c {
+                    ':' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Colon})),
+                    '(' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:OpenParenthesis})),
+                    ')' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:CloseParenthesis})),
+                    ',' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Comma})),
+                    '|' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Or})),
+                    '&' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:And})),
+                    '.' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Dot})),
+                    '=' => match self.it.peek() {
+                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:EqualsEquals}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Equals})),
                     },
-                    '"' => string_data = Some(String::new()),
-                    '\n' => { 
-                        is_comment = false; 
-                        is_newline = true;
-                        tab_depth = 0;
-                        line += 1; 
-                        col = 1; 
+                    '-' => match self.it.peek() {
+                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:SubtractFrom}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Minus})),
                     },
-                    c if !c.is_whitespace() => {
-                        if is_newline { 
-                            // Now figure out tabs vs spaces and what tab_depth of current line is
-                            // for block start/end detection
-                            if let Some(DepthSeparator::SPACES(0)) = depth_separator { // we've seen spaces at the beginning of the line before, but it's the first ever word that's offset
-                                depth_separator = Some(DepthSeparator::SPACES(tab_depth));
-                                tab_depth = 1;
-                            } else if let Some(DepthSeparator::SPACES(sc)) = depth_separator { // we already know that we're using spaces and how many
-                                if tab_depth % sc != 0 {
-                                    return Err(Error{line, col, message:String::from("Unexpected amount of spaces.")});
-                                }
-                                tab_depth = tab_depth / sc;
-                            } // else we're using tabs and '\t' => branch of this match counts tab_depth properly
-                            if tab_depth > last_block_tab_depth { // new block start
-                                if let Some(Token{t:BlockEnd,..}) = r.last() {
-                                    return Err(Error{line, col, message:String::from("Unexpected block identation.")});
-                                }
-                                r.push(Token{line, col:1, len:0, t:BlockStart});
-                                last_block_tab_depth = tab_depth;
-                            } else if tab_depth == last_block_tab_depth && r.len() > 0 { // it's a new line for the old block. Previous statement has ended.
-                                r.push(Token{line:line-1, col:r.last().unwrap().col+1, len:0, t:StatementEnd});
-                            } else {
-                                while tab_depth < last_block_tab_depth {  // block(s) have ended
-                                    if let Some(Token{t:BlockEnd,..}) = r.last() {
-                                        // if multiple blocks are ending, just keep adding BLOCK_END
-                                    } else {
-                                        // last block has ended, so did the previous statement
-                                        r.push(Token{line:line-1, col:r.last().unwrap().col+1, len:0, t:StatementEnd});
-                                    }
-                                    r.push(Token{line, col:1, len:0, t:BlockEnd});
-                                    last_block_tab_depth -=1;
-                                }
-                            }
-                            is_newline = false;
-                        } // done with tab depth detection
-                        // Now to see what kind of token this character will yield.
-                        if let Some(mut last_token) = r.last_mut() {
-                            let should_convert = if let Some(next_char) = it.peek() { !next_char.is_alphanumeric() && *next_char != '.' } else { true };
-                            if let Token{t:Label(label), ..} = last_token {
-                                label.push(c);
-                                last_token.len += 1;
-                                if let Some(t) = if should_convert {
-                                        match label.as_str() { // if the label composes a keyword, replace with keyword
-                                            "task" => Some(Task),
-                                            "method" => Some(Method),
-                                            "else" => Some(Else),
-                                            "effects" => Some(Effects),
-                                            "include" => Some(Include),
-                                            "pass" => Some(Pass),
-                                            "cost" => Some(Cost),
-                                            "or" => Some(Or),
-                                            "and" => Some(And),
-                                            "not" => Some(Not),
-                                            "on" => Some(On),
-                                            "as" => Some(As),
-                                            "type" => Some(Type),
-                                            "false" => Some(Literal(self::Literal::B(false))),
-                                            "true" => Some(Literal(self::Literal::B(true))),
-                                            _ => { if label.contains('.') { 
-                                                    if let Ok(literal) = label.parse::<f32>() {
-                                                        Some(Literal(self::Literal::F(literal)))
-                                                    } else {
-                                                        None
-                                                    }
-                                                } else if let Ok(literal) = label.parse::<i32>() {
-                                                    Some(Literal(self::Literal::I(literal)))
-                                                } else { None }},
-                                        }
-                                    } else { None } {
-                                    last_token.t = t;
-                                }
-                            } else { // last token isn't a label so we're starting a new label or keyword
-                                if should_convert {
-                                    if c.is_numeric() {
-                                        r.push(Token{line, col, len:1, t:Literal(self::Literal::I(c.to_digit(10).unwrap() as i32))})
-                                    }
-                                } else {
-                                    r.push(Token{line, col, len:1, t:Label(String::from(c))})
-                                }
-                            }
-                        } else {
-                            // this is the first token ever
-                            r.push(Token{line, col, len:1, t:Label(String::from(c))})
-                        }
+                    '+' => match self.it.peek() {
+                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:AddTo}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Plus})),
                     },
-                    '\t' if is_newline => { if depth_separator.is_none() { // if we don't know if we're using tabs or spaces
-                            depth_separator = Some(DepthSeparator::TABS);
-                        } else if let Some(DepthSeparator::SPACES(_)) = depth_separator {
-                            return Err(Error{line, col, message:String::from("Tabs and spaces can't be used together")})
-                        }
-                        tab_depth += 1;
+                    '/' => match self.it.peek() {
+                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:DivideBy}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Slash})),
                     },
-                    c if c.is_whitespace() => {
-                        if is_newline { 
-                            if depth_separator.is_none() {
-                                depth_separator = Some(DepthSeparator::SPACES(0));
-                            } else if let Some(DepthSeparator::TABS) = depth_separator {
-                                return Err(Error{line, col, message:String::from("Tabs and spaces can't be used together")})
-                            }
-                            tab_depth += 1; // tab_depth counts amount of spaces seen first. Then on the first non-whitespace character we convert amount of spaces to actual tab-depth
-                        } else {
-                            if let Some(next_char) = it.peek() {
-                                if next_char.is_alphabetic() {
-                                    r.push(Token{line, col, len:1, t:Label(String::new())})
-                                }
-                            }
-                        }
+                    '*' => match self.it.peek() {
+                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:MultiplyBy}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Star})),
                     },
-                    _ => (),
-                }
-                if let Some(Token{t:Equals,..}) = r.last() { // combine multi-symbol operands like -= and <=
-                    match r.get(r.len()-2) {
-                        Some(Token{t:Equals,..}) => {r.pop(); r.last_mut().unwrap().t = EqualsEquals},
-                        Some(Token{t:Smaller,..}) => {r.pop(); r.last_mut().unwrap().t = SmallerOrEquals},
-                        Some(Token{t:Greater,..}) => {r.pop(); r.last_mut().unwrap().t = GreaterOrEquals},
-                        Some(Token{t:Not,..}) => {r.pop(); r.last_mut().unwrap().t = NotEquals},
-                        Some(Token{t:Minus,..}) => {r.pop(); r.last_mut().unwrap().t = SubtractFrom},
-                        Some(Token{t:Plus,..}) => {r.pop(); r.last_mut().unwrap().t = AddTo},
-                        Some(Token{t:Slash,..}) => {r.pop(); r.last_mut().unwrap().t = DivideBy},
-                        Some(Token{t:Star,..}) => {r.pop(); r.last_mut().unwrap().t = MultiplyBy},
-                        _ => (),
+                    '>' => match self.it.peek() {
+                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:GreaterOrEquals}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Greater})),
+                    },
+                    '<' => match self.it.peek() {
+                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:SmallerOrEquals}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Smaller})),
+                    },
+                    '!' => match self.it.peek() {
+                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:NotEquals}; self.it.next(); Some(Ok(t))},
+                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Not}))
+                    },
+                    '"' => {Some(self.string(offset))},
+                    c if c.is_whitespace() => if self.is_newline { 
+                            self.is_newline = false;
+                            if let Some(e) = self.block(c) { 
+                                Some(Err(e))
+                            } else { 
+                                // self block will push on the stack if they are needed.
+                                // pull either the needed block start or the next token
+                                // and pass it down
+                                return self.next() // need to return because self.next() already added next token's length to self.col
+                            }  
+                        } else { 
+                            // whitespace in the middle of a line. It's not a token, 
+                            // So self.col += token.len() won't count. Therefore col should be incremented
+                            self.col += 1;
+                            return self.next() // need to return because self.next() already added next token's length to self.col
+                        },
+                    c if (c.is_alphabetic() || c == '_') => Some(self.identifier(offset)),
+                    c if c.is_digit(10) => Some(self.number(offset)),
+                    _ => {let e = Some(Err(Error{line:self.line, col:self.col, message:"Unexpected character.".to_owned()})); e}
+                };
+                if let Some(result) = &new_token {
+                    match result {
+                        Ok(t) => self.col += t.len,
+                        Err(_) => self.col += 1,
                     }
                 }
+                if let Some((_, '\n')) | None  = self.it.peek() {
+                    if let Some(Token{t:StatementEnd,..}) = self.stash.last() { } else {
+                        self.stash.push(Token{line:self.line, col:self.col, len:0, t:StatementEnd});
+                    }
+                }
+                if let Some(Ok(token)) = new_token {
+                    if self.is_newline && self.tab_depth > 0 {
+                        match token { 
+                            Token{t:BlockStart,..} => (),
+                            _ => {
+                                self.stash.push(token); 
+                                // self.col -= token.len();
+                                self.tab_depth-=1; 
+                                new_token = Some(Ok(Token{line:self.line, col:0, len:0, t:BlockEnd}));
+                                while self.tab_depth > 0 {
+                                    self.stash.push(Token{line:self.line, col:0, len:0, t:BlockEnd});
+                                    self.tab_depth -= 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                self.is_newline = false;
+
+                new_token
+            } else {
+                if self.tab_depth > 0 {
+                    self.tab_depth -= 1;
+                    Some(Ok(Token{line:self.line, col:self.col, len:0, t:BlockEnd}))
+                } else {
+                    None
+                }
             }
-            col += 1;
-            
         }
-        // End of file. Finish off whatever blocks have been here
-        // if last_block_tab_depth > 0 {
-        if r.len() > 0 {
-            r.push(Token{line, col, len:0, t:StatementEnd});
+    }
+}
+
+impl<'a> Lexer<'a> {
+    fn next_char(&mut self) -> Option<(usize, char)> {
+        let c = self.it.next();
+        match c {
+            Some((_, '\n')) => {self.col = 1; self.line += 1; self.is_newline = true; self.next_char()},
+            Some((_, '#')) => {while let Some(_) = self.it.next_if(|(_,c)| *c != '\n') {}; self.next_char()},
+            _ => c,
         }
-        while last_block_tab_depth > 0 {
-            r.push(Token{line, col, len:0, t:BlockEnd});
-            last_block_tab_depth -= 1;
+    }
+
+    fn string(&mut self, offset:usize) -> Result<Token<'a>, Error> {
+        self.col += 1; // increment col for the first '"' since self.col += token.len() will only count the string itself
+        let mut len = 0;
+        let offset = offset + '"'.len_utf8();
+        while let Some(_) = self.it.next_if(|(_,c)| *c != '"' ) { len += 1; }
+        let slice = if let Some((string_end, _)) = self.it.next() { &self.text[offset..string_end] } else { &self.text[offset..]};
+        let r = Ok(Token{line:self.line, col:self.col, len, t:Literal(Literal::S(slice)), });
+        self.col += 1; // count the last '"'
+        r
+    }
+
+    fn number(&mut self, offset:usize) -> Result<Token<'a>, Error> {
+        let mut contains_dot = false;
+        let mut len = 1;
+        while let Some((_,c)) = self.it.next_if(|(_,c)| c.is_digit(10) || *c == '.') { len += 1; if c == '.' { contains_dot = true; }}
+        let slice = if let Some((number_end, _)) = self.it.peek() { &self.text[offset..*number_end]} else { &self.text[offset..]};
+        if contains_dot {
+            match slice.parse::<f32>() {
+                Ok(literal) => Ok(Token{line:self.line, col:self.col, len, t:Literal(Literal::F(literal))}),
+                Err(_) => Err(Error{line:self.line, col:self.col, message:"Unable to parse float.".to_string()})
             }
-        // }
-        r.push(Token{line, col, len:0, t:EOF});
-        Ok(r)
+        } else {
+            match slice.parse::<i32>() {
+                Ok(literal) => Ok(Token{line:self.line, col:self.col, len, t:Literal(Literal::I(literal))}),
+                Err(_) => Err(Error{line:self.line, col:self.col, message:"Unable to parse integer.".to_string()})
+            }
+        }
+    }
+
+    fn identifier(&mut self, offset:usize) -> Result<Token<'a>, Error> {
+        let mut len = 1;
+        while let Some(_) = self.it.next_if(|(_,c)| (c.is_alphanumeric() || *c == '_')) { len += 1; }
+        let slice = if let Some((identifier_end,_)) = self.it.peek() { &self.text[offset..*identifier_end]} else { &self.text[offset..]};
+        let token = match slice {
+            "task" => Ok(Token{line:self.line, col:self.col, len, t:Task}),
+            "planning" => Ok(Token{line:self.line, col:self.col, len, t:Planning}),
+            "else" => Ok(Token{line:self.line, col:self.col, len, t:Else}),
+            "effects" => Ok(Token{line:self.line, col:self.col, len, t:Effects}),
+            "include" => Ok(Token{line:self.line, col:self.col, len, t:Include}),
+            "pass" => Ok(Token{line:self.line, col:self.col, len, t:Pass}),
+            "cost" => Ok(Token{line:self.line, col:self.col, len, t:Cost}),
+            "or" => Ok(Token{line:self.line, col:self.col, len, t:Or}),
+            "and" => Ok(Token{line:self.line, col:self.col, len, t:And}),
+            "not" => Ok(Token{line:self.line, col:self.col, len, t:Not}),
+            "for" => Ok(Token{line:self.line, col:self.col, len, t:For}),
+            "as" => Ok(Token{line:self.line, col:self.col, len, t:As}),
+            "type" => Ok(Token{line:self.line, col:self.col, len, t:Type}),
+            "false" => Ok(Token{line:self.line, col:self.col, len, t:Literal(Literal::B(false))}),
+            "true" => Ok(Token{line:self.line, col:self.col, len, t:Literal(Literal::B(true))}),
+            _ => Ok(Token{line:self.line, col:self.col, len, t:Identifier(slice)})
+        };
+        token
+    }
+
+    fn block(&mut self, c:char) -> Option<Error> {
+        let mut len = 1;
+        let mut is_tabs = c == '\t';
+        let mut is_spaces = c == ' ';
+        while let Some((_,c)) = self.it.next_if(|(_,c)| c.is_whitespace() && *c != '\n') { len += 1; match c { 
+            ' ' => is_spaces = true,
+            '\t' => is_tabs = true,
+            _ => (),
+        } }
+        if let Some((_,'\n')) | Some((_,'#')) | None = self.it.peek() { None } else {
+            match (is_tabs, is_spaces) {
+                (true, false) => self.tabs(len),
+                (false, true) => self.spaces(len),
+                (true, true) |
+                (false, false) => Some(Error{line:self.line, col:self.col, message:"Only tabs or spaces are allowed at the beginning of the line.".to_owned()}),
+            }
+        }
+    }
+
+    fn tabs(&mut self, count:usize) -> Option<Error> {
+        if self.depth_separator.is_none() {
+            self.depth_separator = Some(DepthSeparator::TABS);
+        }
+        if let Some(DepthSeparator::TABS) = self.depth_separator {
+            if self.tab_depth <= count {
+                self.col += self.tab_depth;
+            } else if self.tab_depth > count {
+                self.col += count;
+            }
+            while self.tab_depth < count {
+                self.stash.push(Token{line:self.line, col:self.col, len:1, t:BlockStart});
+                self.col += 1;
+                self.tab_depth += 1;
+            }
+            while self.tab_depth > count {
+                self.stash.push(Token{line:self.line, col:0, len:0, t:BlockEnd});
+                self.tab_depth -= 1;
+            }
+            return None
+        }
+        return Some(Error{line:self.line, col:self.col, message:"Expected spaces at the beginning of the line.".to_owned()})
+    }
+
+    fn spaces(&mut self, count:usize) -> Option<Error> {
+        if self.depth_separator.is_none() {
+            self.depth_separator = Some(DepthSeparator::SPACES(count));
+        }
+        if let Some(DepthSeparator::SPACES(one_depth)) = self.depth_separator {
+            if count % one_depth != 0 {
+                return Some(Error{line:self.line, col:self.col, message:format!("Extra spaces. Expected {}.", one_depth)})
+            }
+            let count = count / one_depth;
+            if self.tab_depth <= count {
+                self.col += self.tab_depth*one_depth;
+            } else if self.tab_depth > count {
+                self.col += count*one_depth;
+            }
+            while self.tab_depth < count {
+                self.stash.push(Token{line:self.line, col:self.col, len:one_depth, t:BlockStart});
+                self.col += one_depth;
+                self.tab_depth += 1;
+            }
+            while self.tab_depth > count {
+                self.stash.push(Token{line:self.line, col:0, len:0, t:BlockEnd});
+                self.tab_depth -= 1;
+            }
+            return None
+        }
+        return Some(Error{line:self.line, col:self.col, message:"Expected tabs at the beginning of the line.".to_owned()})
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::htn::parser::{lexer::DepthSeparator, Error};
+
+    use super::{Lexer, Token, TokenData::*, Literal::*};
+    #[test]
+    fn test_include() {
+        let code = "include \"str\"";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:7, t:Include})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:10, len:3, t:Literal(S("str"))})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:14, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), None);
+    }
+
+    #[test]
+    fn test_comments() {
+        let code = "# haha\n  # haha\n\ntask";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:1, len:4, t:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:5, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), None);
+        assert_eq!(l.depth_separator, None);
+    }
+
+    #[test]
+    fn test_space_block() {
+        let code = "  &\n    &\n  &\n&";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:2, t:BlockStart})));
+        assert_eq!(l.depth_separator, Some(DepthSeparator::SPACES(2)));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:3, len:1, t:And})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:4, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:3, len:2, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:5, len:1, t:And})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:6, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:0, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:3, len:1, t:And})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:4, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:0, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:1, len:1, t:And})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:2, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), None);
+    }
+
+    #[test]
+    fn test_tab_block() {
+        let code = "\t&\n\t\t&\n\t&\n&";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:1, t:BlockStart})));
+        assert_eq!(l.depth_separator, Some(DepthSeparator::TABS));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:2, len:1, t:And})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:3, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:1, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:3, len:1, t:And})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:4, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:0, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:2, len:1, t:And})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:3, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:0, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:1, len:1, t:And})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:2, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), None);
+    }
+
+    #[test]
+    fn test_error_block() {
+        let code = " &\n\t&";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:1, t:BlockStart})));
+        assert_eq!(l.depth_separator, Some(DepthSeparator::SPACES(1)));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:2, len:1, t:And})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:3, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Err(Error{line:2, col:1, message:"Expected spaces at the beginning of the line.".to_owned()})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:1, t:And})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:3, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:3, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), None);
+    }
+
+    #[test]
+    fn test_double_block_end() {
+        let code = "task Test:\n\ttask M1:\n\t\top()\ntask Two";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:4, t:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:6, len:4, t:Identifier("Test")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:10, len:1, t:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:11, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:1, len:1, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:4, t:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:7, len:2, t:Identifier("M1")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:9, len:1, t:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:10, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:2, len:1, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:3, len:2, t:Identifier("op")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:5, len:1, t:OpenParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:6, len:1, t:CloseParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:7, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:0, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:0, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:1, len:4, t:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:6, len:3, t:Identifier("Two")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:4, col:9, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), None);
+    }
+
+    #[test]
+    fn test_type() {
+        let code = "type Cell:\n\tc1\n\tc2";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:4, t:Type})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:6, len:4, t:Identifier("Cell")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:10, len:1, t:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:11, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:1, len:1, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:2, t:Identifier("c1")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:2, col:4, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:2, len:2, t:Identifier("c2")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:4, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{line:3, col:4, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), None);
+    }
+
+    #[test]
+    fn test_ops() {
+        let code = "><-*/p=+!=<=>=!true";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:1, t:Greater})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:2, len:1, t:Smaller})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:3, len:1, t:Minus})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:4, len:1, t:Star})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:5, len:1, t:Slash})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:6, len:1, t:Identifier("p")})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:7, len:1, t:Equals})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:8, len:1, t:Plus})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:9, len:2, t:NotEquals})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:11, len:2, t:SmallerOrEquals})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:13, len:2, t:GreaterOrEquals})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:15, len:1, t:Not})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:16, len:4, t:Literal(B(true))})));
+        assert_eq!(l.next(), Some(Ok(Token{line:1, col:20, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), None);
     }
 }
