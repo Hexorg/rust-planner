@@ -21,42 +21,42 @@ task Main(right.bottom == 3 & right.middle == 2 & right.top == 1):
     complete()
 
 # ids: 1, 2, 3
-task Pikcup_top(carry==0 & peg.top > 0) on Peg as peg:
+task Pikcup_top(carry==0 & peg.top > 0) for Peg as peg:
     pikcup(peg.top)
 effects:
     carry = peg.top
     peg.top = 0
 
 # ids: 4, 5, 6
-task Pikcup_middle(carry==0 & peg.middle > 0 & peg.top == 0) on Peg as peg:
+task Pikcup_middle(carry==0 & peg.middle > 0 & peg.top == 0) for Peg as peg:
     pikcup(peg.middle)
 effects:
     carry = peg.middle
     peg.middle = 0
 
 # ids: 7, 8, 9
-task Pikcup_bottom(carry==0 & peg.bottom > 0 & peg.middle == 0 & peg.top == 0) on Peg as peg:
+task Pikcup_bottom(carry==0 & peg.bottom > 0 & peg.middle == 0 & peg.top == 0) for Peg as peg:
     pikcup(peg.bottom)
 effects:
     carry = peg.bottom
     peg.bottom = 0
 
 # ids: 10, 11, 12
-task Dropoff_top(carry>0 & peg.top==0 & peg.middle > carry) on Peg as peg:
+task Dropoff_top(carry>0 & peg.top==0 & peg.middle > carry) for Peg as peg:
     dropoff(peg.top, carry)
 effects:
     peg.top = carry
     carry = 0
 
 # idx: 13, 14, 15
-task Dropoff_middle(carry>0 & peg.middle==0 & peg.bottom > carry & peg.top == 0) on Peg as peg:
+task Dropoff_middle(carry>0 & peg.middle==0 & peg.bottom > carry & peg.top == 0) for Peg as peg:
     dropoff(peg.middle, carry)
 effects:
     peg.middle = carry
     carry = 0
 
 # ids: 16, 17, 18
-task Dropoff_bottom(carry>0 & peg.bottom==0 & peg.middle == 0 & peg.top == 0) on Peg as peg:
+task Dropoff_bottom(carry>0 & peg.bottom==0 & peg.middle == 0 & peg.top == 0) for Peg as peg:
     dropoff(peg.bottom, carry)
 effects:
     peg.bottom = carry
