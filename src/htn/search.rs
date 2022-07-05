@@ -45,6 +45,9 @@ pub fn a_star<F>(start:Node, goal:&[Operation], heuristic: F, planner:&Planner, 
     cheapest_known_cost_to_state.insert(start.state.clone(),  0.into()); // Cost to reach N
     estimated_cost_to_goal_through_state.insert(start.state.clone(), estimated_cost_to_goal); // Estimated total path cost if it goes through N
     open_set.push(start, Reverse(estimated_cost_to_goal));
+
+    // let mut task_names : Vec<String> = planner.domain.task_mapping().iter().map(|(k,v)| k.clone()).collect();
+    // task_names.sort_by(|l,r| planner.domain.task_mapping()[l].cmp(&planner.domain.task_mapping()[r]));
     
     while let Some((mut current, total_plan_cost)) = open_set.pop() {
         statistics.astar_visited_nodes += 1;
@@ -60,9 +63,10 @@ pub fn a_star<F>(start:Node, goal:&[Operation], heuristic: F, planner:&Planner, 
             statistics.calls_to_eval += 1;
             if current.state.eval(&task.preconditions).unwrap().is_true() {
                 let cost_to_neighboring_task = cheapest_known_cost_to_state.get(&current.state).unwrap_or(&i32::MAX).clone() + cost;
+                // println!("Exploring running task {}: {}", task_id, task_names[*task_id]);
                 let mut new_state = current.state.clone();
                 statistics.calls_to_eval += 1;
-                new_state.eval(&task.effects);
+                new_state.eval_mut(&task.effects);
                 if !cheapest_known_cost_to_state.contains_key(&new_state) || cost_to_neighboring_task < cheapest_known_cost_to_state[&new_state] {
                     let new_node = Node::new(&new_state, *task_id);
                     let new_cost = cost_to_neighboring_task + heuristic(&new_node);

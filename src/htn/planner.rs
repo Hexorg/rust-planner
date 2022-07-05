@@ -105,7 +105,7 @@ impl Planner {
             }
             match &task.body {
                 TaskBody::Primitive(ops) => {let r = self.add_primitive_task_operators(plan, state, stats, ops);
-                    state.eval(&task.effects);
+                    state.eval_mut(&task.effects);
                     r},
                 TaskBody::Composite(methods) => {
                     let mut method_plans = PriorityQueue::new();
