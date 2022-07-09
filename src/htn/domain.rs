@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 // use super::optimization::{self, Inertia};
-use super::compiler::{Task, Error, self, TaskBody};
+use super::compiler::{Task, self, TaskBody};
 use super::parser::statement::StatementVisitor;
 use super::parser::tokens::{Token, TokenData, Literal};
 
+pub use compiler::Error;
 
 /// Structure that holds compiled Tasks as well as optimization data
 pub struct Domain {
