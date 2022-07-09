@@ -112,7 +112,7 @@ impl<'a> Stmt<'a> {
             Stmt::Expression(expr) => visitor.visit_expression(expr),
             Stmt::Type{name, body} => visitor.visit_type(name, body),
             Stmt::Include(token) => visitor.visit_include(token),
-            _ => panic!("Unexpected statement structure. Mut be a bug in code by this point.")
+            Stmt::TaskDeclaration { name } => visitor.visit_task_declaration(name),
         }
     }
     pub fn to_err(&self, msg:&str) -> Error {

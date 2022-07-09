@@ -109,15 +109,16 @@ impl Planner {
                     r},
                 TaskBody::Composite(methods) => {
                     let mut method_plans = PriorityQueue::new();
-                    for (method_id, method) in methods.iter().enumerate() {
+                    for method_id in methods {
+                        let method = &self.domain.tasks()[*method_id];
                         if let Some((mut method_plan, method_plan_cost)) = a_star(Node::new(state, usize::MAX), &method.preconditions, heuristic, self, stats) {
-                            method_plan.push(method_id);
+                            method_plan.push(*method_id);
                             let cost = if let OperandType::I(v) = state.eval(&method.cost).unwrap() { v } else { 0 };
                             method_plans.push(method_plan, Reverse(method_plan_cost+cost));
                         }
                     }
                     // println!("Method plans: {:?}", method_plans);
-                    if let Some((mut method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
+                    if let Some((method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
                         for subtask in method_plan {
                             self.run_astar(plan, state, stats, subtask)?;
                         }

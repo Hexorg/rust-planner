@@ -30,16 +30,16 @@ impl<'a, 'b> StateOpsCompiler<'a, 'b> {
 
 }
 
-impl<'a, 'b> StatementVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'a, 'b> {
-    fn visit_task_declaration(&mut self, name:&[Token]) -> Result<Vec<Operation>, Error> {
-        Err(name[0].to_err("Can not use task statement in this context."))
+impl<'a, 'b> StatementVisitor<'b, Vec<Operation>, Error> for StateOpsCompiler<'a, 'b> {
+    fn visit_task_declaration(&mut self, name:&[Token<'b>]) -> Result<Vec<Operation>, Error> {
+        Err(name[0].to_err("Can not use task statement in this context.").into())
     }
 
-    fn visit_task(&mut self, name:&[Token], _preconditions:Option<&Expr>, _cost:Option<&Expr>, _binding:Option<(&str, &str)>, _body:&Stmt, _effects:Option<&Stmt>, _planning:Option<&Stmt>) -> Result<Vec<Operation>, Error> {
-        Err(name[0].to_err("Can not use task statement in this context."))
+    fn visit_task(&mut self, name:&[Token<'b>], _preconditions:Option<&Expr<'b>>, _cost:Option<&Expr<'b>>, _binding:Option<(&'b str, &'b str)>, _body:&Stmt<'b>, _effects:Option<&Stmt<'b>>, _planning:Option<&Stmt<'b>>) -> Result<Vec<Operation>, Error> {
+        Err(name[0].to_err("Can not use task statement in this context.").into())
     }
 
-    fn visit_block(&mut self, block:&[Stmt<'a>]) -> Result<Vec<Operation>, Error> {
+    fn visit_block(&mut self, block:&[Stmt<'b>]) -> Result<Vec<Operation>, Error> {
         let mut result = Vec::new();
         for stmt in block {
             result.extend(stmt.accept(self)?);
@@ -47,21 +47,21 @@ impl<'a, 'b> StatementVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'a
         Ok(result)
     }
 
-    fn visit_expression(&mut self, expr:&Expr<'a>) -> Result<Vec<Operation>, Error> {
+    fn visit_expression(&mut self, expr:&Expr<'b>) -> Result<Vec<Operation>, Error> {
         expr.accept(self)
     }
 
-    fn visit_include(&mut self, filepath:&Token) -> Result<Vec<Operation>, Error> {
-        Err(filepath.to_err("Can not use include statement in this context."))
+    fn visit_include(&mut self, filepath:&Token<'b>) -> Result<Vec<Operation>, Error> {
+        Err(filepath.to_err("Can not use include statement in this context.").into())
     }
 
-    fn visit_type(&mut self, class:&Token, _body:&Stmt) -> Result<Vec<Operation>, Error> {
-        Err(class.to_err("Can not use type statement in this context."))
+    fn visit_type(&mut self, class:&Token<'b>, _body:&Stmt<'b>) -> Result<Vec<Operation>, Error> {
+        Err(class.to_err("Can not use type statement in this context.").into())
     }
 }
 
-impl<'a, 'b> ExpressionVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'a, 'b> {
-    fn visit_binary_expr(&mut self, token: &Token<'a>, left: &Expr<'a>, right: &Expr<'a>) -> Result<Vec<Operation>, Error> {
+impl<'a, 'b> ExpressionVisitor<'b, Vec<Operation>, Error> for StateOpsCompiler<'a, 'b> {
+    fn visit_binary_expr(&mut self, token: &Token<'b>, left: &Expr<'b>, right: &Expr<'b>) -> Result<Vec<Operation>, Error> {
         use TokenData::*;
         let mut bytecode = left.accept(self)?;
         bytecode.extend(right.accept(self)?);
@@ -82,21 +82,21 @@ impl<'a, 'b> ExpressionVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'
         }
     }
 
-    fn visit_grouping_expr(&mut self, _: &Token, group: &Expr<'a>) -> Result<Vec<Operation>, Error> {
+    fn visit_grouping_expr(&mut self, _: &Token<'b>, group: &Expr<'b>) -> Result<Vec<Operation>, Error> {
         group.accept(self)
     }
 
-    fn visit_literal_expr(&mut self, token: &Token) -> Result<Vec<Operation>, Error> {
+    fn visit_literal_expr(&mut self, token: &Token<'b>) -> Result<Vec<Operation>, Error> {
         use std::convert::TryFrom;
         Ok(vec![Operation::Push(OperandType::try_from(*token)?)])
     }
 
-    fn visit_variable_expr(&mut self, var_path:&[Token]) -> Result<Vec<Operation>, Error> {
-        let idx = super::get_varpath_idx(self.substitution, var_path, &mut self.state_mapping)?;
+    fn visit_variable_expr(&mut self, var_path:&[Token<'b>]) -> Result<Vec<Operation>, Error> {
+        let idx = super::get_varpath_idx(self.substitution, var_path, &mut self.state_mapping);
         Ok(vec![Operation::ReadState(idx)])
     }
 
-    fn visit_unary_expr(&mut self, token: &Token, right: &Expr<'a>) -> Result<Vec<Operation>, Error> {
+    fn visit_unary_expr(&mut self, token: &Token<'b>, right: &Expr<'b>) -> Result<Vec<Operation>, Error> {
         use TokenData::*;
         match token.t {
             Not => {let mut bytecode = right.accept(self)?; bytecode.push(Operation::Not); Ok(bytecode)}
@@ -104,19 +104,19 @@ impl<'a, 'b> ExpressionVisitor<'a, Vec<Operation>, Error> for StateOpsCompiler<'
         }
     }
 
-    fn visit_assignment_expr(&mut self, var_path:&[Token], left:&Expr<'a>) -> Result<Vec<Operation>, Error> {
-        let idx = super::get_varpath_idx(self.substitution, var_path, &mut self.state_mapping)?;
+    fn visit_assignment_expr(&mut self, var_path:&[Token<'b>], left:&Expr<'b>) -> Result<Vec<Operation>, Error> {
+        let idx = super::get_varpath_idx(self.substitution, var_path, &mut self.state_mapping);
         let mut expr = left.accept(self)?;
         expr.push(Operation::WriteState(idx));
         Ok(expr)
     }
 
-    fn visit_call_expr(&mut self, target: &Token, _args:&[Expr]) -> Result<Vec<Operation>, Error> {
-        Err(target.to_err("Can not call in this context."))
+    fn visit_call_expr(&mut self, target: &Token<'b>, _args:&[Expr<'b>]) -> Result<Vec<Operation>, Error> {
+        Err(target.to_err("Can not call in this context.").into())
     }
 
-    fn visit_nop_expr(&mut self, token: &Token) -> Result<Vec<Operation>, Error> {
-        Err(token.to_err("Can not use pass expression in this context."))
+    fn visit_nop_expr(&mut self, token: &Token<'b>) -> Result<Vec<Operation>, Error> {
+        Err(token.to_err("Can not use pass expression in this context.").into())
     }
 }
 

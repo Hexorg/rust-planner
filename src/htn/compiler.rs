@@ -1,8 +1,47 @@
 
 use std::collections::HashMap;
 
-use super::parser::{Error, tokens::{Token, TokenData, Literal}};
+use super::parser::{self, tokens::{Token, TokenData, Literal}};
 // use super::domain;
+
+#[derive(Debug)]
+pub enum Error {
+    Parser(Option<String>, parser::Error),
+    Basic(String, String),
+    FromFile(String, Vec<Error>)
+}
+
+impl From<parser::Error> for Error {
+    fn from(e: parser::Error) -> Self {
+        Self::Parser(None, e)
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Basic(s, e) => write!(f, "{}: {}", s, e),
+            Self::FromFile(s, es) => {write!(f, "In file included from {}:\n", s)?; es.iter().try_for_each(|e| write!(f, "{}", e))},
+            Self::Parser(None, e) => write!(f, "{:?}", e),
+            Self::Parser(Some(filepath), e) => {
+                let htn_source = std::fs::read_to_string(filepath).unwrap();
+                let mut lines = htn_source.lines();
+                let mut last_error_line = 0;
+                if let Some(eline) = lines.nth(e.line - last_error_line-1) {
+                    let line_number_string = format!("{}", e.line);
+                    writeln!(f, "{}:{} Error:", filepath, e.line)?; 
+                    writeln!(f, "\t{}: {}", line_number_string, eline)?;
+                    last_error_line = e.line;
+                    let debug_str_col_pos = line_number_string.len() + 1 + e.col;
+                    writeln!(f, "\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos)?; 
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum OperandType {
@@ -179,7 +218,7 @@ pub enum Operation {
 #[derive(Debug, PartialEq)]
 pub enum TaskBody {
     Primitive(Vec<Operation>),
-    Composite(Vec<Task>)
+    Composite(Vec<usize>)
 }
 
 #[derive(Debug, PartialEq)]
@@ -189,6 +228,7 @@ pub struct Task {
     pub body: TaskBody,
     pub effects: Vec<Operation>,
     pub planning: Vec<Operation>,
+    pub is_method: bool,
     wants: HashMap<usize, optimization::Inertia>,
     provides: HashMap<usize, optimization::Inertia>,
 }
@@ -204,7 +244,19 @@ impl Task {
 }
 
 #[inline]
-fn get_varpath_idx(substitution:Option<(&str, &str)>, var_path:&[Token], mapping:&mut HashMap<String, usize>) -> Result<usize, Error> {
+fn get_varpath_idx(substitution:Option<(&str, &str)>, var_path:&[Token], mapping:&mut HashMap<String, usize>) -> usize {
+    let vname = varpath_to_string(substitution, var_path);
+    if mapping.contains_key(vname.as_str()) {
+        mapping[vname.as_str()]
+    } else {
+        let s = mapping.len();
+        mapping.insert(vname, s);
+        s
+    }
+}
+
+#[inline]
+fn varpath_to_string(substitution:Option<(&str, &str)>, var_path:&[Token]) -> String {
     let mut iter = var_path.iter();
     let first = iter.by_ref().take(1).map(|t| t.unwrap_identifier()).fold(String::new(), |acc, item| {
         acc + if let Some((from, to)) = substitution {
@@ -217,14 +269,7 @@ fn get_varpath_idx(substitution:Option<(&str, &str)>, var_path:&[Token], mapping
             item
         }
     });
-    let vname = iter.map(|t| t.unwrap_identifier()).fold(first, |acc,item| acc + "." + item);
-    if mapping.contains_key(vname.as_str()) {
-        Ok(mapping[vname.as_str()])
-    } else {
-        let s = mapping.len();
-        mapping.insert(vname, s);
-        Ok(s)
-    }
+    iter.map(|t| t.unwrap_identifier()).fold(first, |acc,item| acc + "." + item)
 }
 
 mod state_ops;

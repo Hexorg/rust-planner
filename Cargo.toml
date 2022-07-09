@@ -11,4 +11,6 @@ crate-type   = ["rlib", "cdylib"]
 
 [dependencies]
 priority-queue = "1.1.1"
+tempfile = "3.3.0"
+filename = "0.1.1"
 # z3 = "0.11.2"
