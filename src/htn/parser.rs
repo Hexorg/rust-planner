@@ -276,21 +276,28 @@ impl<'a> Parser<'a> {
     fn task_statement(&mut self) -> Result<Stmt<'a>, Error> {
         let _task = self.lexer.next();
         let name = self.parse_object_path()?;
+        let mut preconditions = None;
+        let mut binding = None;
+        let mut cost = None;
+        loop {
+            match self.lexer.peek() {
+                Some(Ok(Token{t:OpenParenthesis,..})) => preconditions = self.parse_preconditions()?,
+                Some(Ok(Token{t:For,..})) => binding = self.parse_binding()?,
+                Some(Ok(Token{t:Cost,..})) => cost = self.parse_cost()?,
+                _ => break,
+            }
+        }
         if let Some(Ok(Token{t:StatementEnd,..})) = self.lexer.peek() {
             self.lexer.next();
-            Ok(Stmt::TaskDeclaration{name})
-        } else {
-            let mut preconditions = None;
-            let mut binding = None;
-            let mut cost = None;
-            loop {
-                match self.lexer.peek() {
-                    Some(Ok(Token{t:OpenParenthesis,..})) => preconditions = self.parse_preconditions()?,
-                    Some(Ok(Token{t:For,..})) => binding = self.parse_binding()?,
-                    Some(Ok(Token{t:Cost,..})) => cost = self.parse_cost()?,
-                    _ => break,
-                }
+            if let Some(e) = preconditions {
+                Err(e.to_err("Unexpected preconditions in task declaration."))
+            } else if let Some(e) = cost {
+                Err(e.to_err("Unexpected cost in task declaration."))
+            } else {
+                Ok(Stmt::TaskDeclaration{name, binding})
             }
+        } else {
+            
             let body = Box::new(self.parse_body()?);
             let mut effects = None;
             let mut planning = None;
@@ -400,9 +407,10 @@ mod tests {
         let code = "task Main.eat";
         let mut parser = Parser::new(code);
         assert_eq!(parser.next(), Some(Ok(Stmt::TaskDeclaration{name:vec![
-            Token{line:1, col:6, len:4, t:Identifier("Main")},
-            Token{line:1, col:11, len:3, t:Identifier("eat")}
-        ]})));
+                Token{line:1, col:6, len:4, t:Identifier("Main")},
+                Token{line:1, col:11, len:3, t:Identifier("eat")}
+            ],
+            binding:None})));
         assert_eq!(parser.next(), None)
     }
 

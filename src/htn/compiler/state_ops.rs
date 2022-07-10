@@ -31,7 +31,7 @@ impl<'a, 'b> StateOpsCompiler<'a, 'b> {
 }
 
 impl<'a, 'b> StatementVisitor<'b, Vec<Operation>, Error> for StateOpsCompiler<'a, 'b> {
-    fn visit_task_declaration(&mut self, name:&[Token<'b>]) -> Result<Vec<Operation>, Error> {
+    fn visit_task_declaration(&mut self, name:&[Token<'b>], _binding:Option<(&'b str, &'b str)>) -> Result<Vec<Operation>, Error> {
         Err(name[0].to_err("Can not use task statement in this context.").into())
     }
 

@@ -2,7 +2,6 @@
 use std::collections::HashMap;
 
 use super::parser::{self, tokens::{Token, TokenData, Literal}};
-// use super::domain;
 
 #[derive(Debug)]
 pub enum Error {
@@ -26,12 +25,10 @@ impl std::fmt::Display for Error {
             Self::Parser(Some(filepath), e) => {
                 let htn_source = std::fs::read_to_string(filepath).unwrap();
                 let mut lines = htn_source.lines();
-                let mut last_error_line = 0;
-                if let Some(eline) = lines.nth(e.line - last_error_line-1) {
+                if let Some(eline) = lines.nth(e.line - 1) {
                     let line_number_string = format!("{}", e.line);
                     writeln!(f, "{}:{} Error:", filepath, e.line)?; 
                     writeln!(f, "\t{}: {}", line_number_string, eline)?;
-                    last_error_line = e.line;
                     let debug_str_col_pos = line_number_string.len() + 1 + e.col;
                     writeln!(f, "\t{:->width$} {}\n",'^', e.message, width=debug_str_col_pos)?; 
                 }
@@ -240,6 +237,12 @@ impl Task {
 
     pub fn provides(&self) -> &HashMap<usize, optimization::Inertia> {
         &self.provides
+    }
+}
+
+impl Default for Task {
+    fn default() -> Self {
+        Self { preconditions: Default::default(), cost: Default::default(), body: TaskBody::Primitive(Default::default()), effects: Default::default(), planning: Default::default(), is_method: Default::default(), wants: Default::default(), provides: Default::default() }
     }
 }
 

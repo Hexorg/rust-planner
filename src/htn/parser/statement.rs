@@ -2,7 +2,7 @@ use super::{Error, tokens::Token, expression::Expr};
 use std::fmt;
 
 pub trait StatementVisitor<'a, T, E> {
-    fn visit_task_declaration(&mut self, name:&[Token<'a>]) -> Result<T, E>;
+    fn visit_task_declaration(&mut self, name:&[Token<'a>], binding:Option<(&'a str, &'a str)>) -> Result<T, E>;
     fn visit_task(&mut self, name:&[Token<'a>], preconditions:Option<&Expr<'a>>, cost:Option<&Expr<'a>>, binding:Option<(&'a str, &'a str)>, body:&Stmt<'a>, effects:Option<&Stmt<'a>>, planning:Option<&Stmt<'a>>) -> Result<T, E>;
     fn visit_block(&mut self, block:&[Stmt<'a>]) -> Result<T, E>;
     fn visit_expression(&mut self, expr:&Expr<'a>) -> Result<T, E>;
@@ -15,6 +15,7 @@ pub trait StatementVisitor<'a, T, E> {
 pub enum Stmt<'a> {
     TaskDeclaration{
         name:Vec<Token<'a>>,
+        binding:Option<(&'a str, &'a str)>,
     },
     Task{
         name:Vec<Token<'a>>, 
@@ -56,13 +57,13 @@ impl<'a, 'b> From<&'a mut fmt::Formatter<'b>> for StmtFormatter<'a, 'b> {
 }
 
 impl StatementVisitor<'_, (), std::fmt::Error> for StmtFormatter<'_, '_> {
-    fn visit_task_declaration(&mut self, name:&[Token]) -> std::fmt::Result {
+    fn visit_task_declaration(&mut self, name:&[Token], _binding:Option<(&str, &str)>) -> std::fmt::Result {
         write!(self.f, "{:>depth$}task {}", "", depth=self.depth)?;
         self.write_var_path(name)
     }
 
     fn visit_task(&mut self, name:&[Token], preconditions:Option<&Expr>, cost:Option<&Expr>, binding:Option<(&str, &str)>, body:&Stmt, effects:Option<&Stmt>, planning:Option<&Stmt>) -> std::fmt::Result {
-        self.visit_task_declaration(name)?;
+        self.visit_task_declaration(name, binding)?;
         preconditions.and_then(|p| Some(write!(self.f, "({})", p))).unwrap_or(Ok(()))?;
         binding.and_then(|(class, variable)| Some(write!(self.f, " for {} as {}", class, variable))).unwrap_or(Ok(()))?;
         cost.and_then(|c| Some(write!(self.f, " cost {}", c))).unwrap_or(Ok(()))?;
@@ -112,12 +113,12 @@ impl<'a> Stmt<'a> {
             Stmt::Expression(expr) => visitor.visit_expression(expr),
             Stmt::Type{name, body} => visitor.visit_type(name, body),
             Stmt::Include(token) => visitor.visit_include(token),
-            Stmt::TaskDeclaration { name } => visitor.visit_task_declaration(name),
+            Stmt::TaskDeclaration { name, binding } => visitor.visit_task_declaration(name, *binding),
         }
     }
     pub fn to_err(&self, msg:&str) -> Error {
         match self {
-            Stmt::TaskDeclaration{name} |
+            Stmt::TaskDeclaration{name,..} |
             Stmt::Task{name,..} => name[0].to_err(msg),
             Stmt::Type{name,..} => name.to_err(msg),
             Stmt::Block(blk) => blk.first().expect("Unable to generate error for empty block.").to_err(msg),
