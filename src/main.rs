@@ -50,7 +50,7 @@ fn main() {
             pos += 2;
         }
 
-        let plan = planner.plan(&state).unwrap();
+        let plan = planner.plan(&state, &mut |_| ()).unwrap();
         println!("Planer finished successfully. Plan: {:?}\nDecompiled plan:", plan);
         let blackboard = planner.domain.blackboard_vec();
         let operators = planner.domain.operator_vec();

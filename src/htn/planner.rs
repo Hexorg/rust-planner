@@ -75,14 +75,15 @@ impl Planner {
         (task, r)
     }
 
-    fn add_primitive_task_operators(&self, plan:&mut Plan, state:&mut State, stats:&mut Statistics, body:&Vec<Operation>) -> Result<bool, Error> {
+    fn add_primitive_task_operators<F>(&self, plan:&mut Plan, state:&mut State, stats:&mut Statistics, body:&Vec<Operation>, on_plan:&mut F) -> Result<bool, Error> 
+    where F: FnMut(&Vec<Operation>)->() {
         let mut all = true;
         for op in body {
             all &= match op {
                 Operation::ReadBlackboard(_) |
                 Operation::WriteBlackboard(_) |
                 Operation::CallOperator(_, _) => {plan.0.push(*op); Ok(true)},
-                Operation::PlanTask(task_id) => self.run_astar(plan, state, stats, *task_id),
+                Operation::PlanTask(task_id) => self.run_astar(plan, state, stats, *task_id, on_plan),
                 _ => Err(Error("Unexpected primitive task body operation.".to_owned())),
             }?;
         }
@@ -90,7 +91,8 @@ impl Planner {
     }
 
 
-    fn run_astar(&self, plan:&mut Plan, state:&mut State, stats:&mut Statistics, task_id:usize) -> Result<bool, Error> {
+    fn run_astar<F>(&self, plan:&mut Plan, state:&mut State, stats:&mut Statistics, task_id:usize, on_plan:&mut F) -> Result<bool, Error> 
+    where F: FnMut(&Vec<Operation>)->() { 
         if plan.0.len() > 40 && task_id == self.domain.main_id() {
             return Ok(true)
         }
@@ -101,10 +103,11 @@ impl Planner {
  
         if let Some((task_plan, _task_plan_cost)) = a_star(Node::new(state, usize::MAX), &task.preconditions, heuristic, self, stats) {
             for subtask in task_plan {
-                self.run_astar(plan, state, stats, subtask)?;
+                self.run_astar(plan, state, stats, subtask, on_plan)?;
             }
+            on_plan(&task.planning);
             match &task.body {
-                TaskBody::Primitive(ops) => {let r = self.add_primitive_task_operators(plan, state, stats, ops);
+                TaskBody::Primitive(ops) => {let r = self.add_primitive_task_operators(plan, state, stats, ops, on_plan);
                     state.eval_mut(&task.effects);
                     r},
                 TaskBody::Composite(methods) => {
@@ -120,7 +123,7 @@ impl Planner {
                     // println!("Method plans: {:?}", method_plans);
                     if let Some((method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
                         for subtask in method_plan {
-                            self.run_astar(plan, state, stats, subtask)?;
+                            self.run_astar(plan, state, stats, subtask, on_plan)?;
                         }
                         Ok(true)
                     } else {
@@ -138,12 +141,13 @@ impl Planner {
         Planner{domain, task_duration:HashMap::new()}
     }
 
-    pub fn plan(&self, state:&State) -> Result<Plan, Error> {
+    pub fn plan<F>(&self, state:&State, on_plan:&mut F) -> Result<Plan, Error> 
+    where F: FnMut(&Vec<Operation>)->() {
         let mut plan = Plan(Vec::new());
         let mut state = state.clone();
         let mut stats = Statistics::new();
         println!("Running planning...");
-        self.run_astar(&mut plan, &mut state, &mut stats, self.domain.main_id())?;
+        self.run_astar(&mut plan, &mut state, &mut stats, self.domain.main_id(), on_plan)?;
         println!("*** Statistics:\n{:?}", stats);
         Ok(plan)
     }
