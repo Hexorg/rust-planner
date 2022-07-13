@@ -86,6 +86,9 @@ impl Planner {
                 Operation::PlanTask(task_id) => self.run_astar(plan, state, stats, *task_id, on_plan),
                 _ => Err(Error("Unexpected primitive task body operation.".to_owned())),
             }?;
+            if !all {
+                break;
+            }
         }
         Ok(all)
     }
@@ -122,10 +125,11 @@ impl Planner {
                     }
                     // println!("Method plans: {:?}", method_plans);
                     if let Some((method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
+                        let mut all = true;
                         for subtask in method_plan {
-                            self.run_astar(plan, state, stats, subtask, on_plan)?;
+                            all &= self.run_astar(plan, state, stats, subtask, on_plan)?;
                         }
-                        Ok(true)
+                        Ok(all)
                     } else {
                         // No reachable methods
                         Ok(false)

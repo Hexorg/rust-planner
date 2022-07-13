@@ -20,7 +20,7 @@
             "request": "launch",
             "name": "Debug 'htn_planner' with htns/Supplier.htn",
             "program": "${workspaceRoot}/target/debug/htn_planner",
-            "args": ["htns/Supplier.htn"],
+            "args": ["htns/Supplier.htn", "hunger", "6.0"],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": ["rust"]
         },
