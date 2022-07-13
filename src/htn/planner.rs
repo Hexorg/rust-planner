@@ -124,16 +124,18 @@ impl Planner {
                         }
                     }
                     // println!("Method plans: {:?}", method_plans);
-                    if let Some((method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
+                    let mut result = Ok(false);
+                    while let Some((method_plan, _method_plan_cost)) = method_plans.pop() { // Get the cheapest method to run
                         let mut all = true;
                         for subtask in method_plan {
                             all &= self.run_astar(plan, state, stats, subtask, on_plan)?;
                         }
-                        Ok(all)
-                    } else {
-                        // No reachable methods
-                        Ok(false)
+                        if all {
+                            result = Ok(true);
+                            break
+                        }
                     }
+                    result
                 }
             }
         } else {
