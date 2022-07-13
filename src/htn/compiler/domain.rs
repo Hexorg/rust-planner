@@ -51,6 +51,9 @@ impl<'a, 'b> DomainCompiler<'a, 'b> {
 impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
     fn visit_task_declaration(&mut self, name:&[Token], binding:Option<(&'b str, &'b str)>) -> Result<(), Error> {
         let substitutions = if let Some((cls, body_variable)) = binding {
+            if !self.type_mapping.contains_key(cls) {
+                return Err(name[0].to_err(&format!("Undeclared variable type '{}'.", cls)).into())
+            }
             self.type_mapping[cls].iter().map(|class_variable| Some((String::from(body_variable), class_variable.clone()))).collect()
         } else {
             vec![None] // Forces the next for loop to iterate at least once
@@ -98,6 +101,9 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
             1 => {
                 // Step 1: Prepare vector of substitutions. Substitution is on format (from, to), or None if we don't need any
                 let substitutions = if let Some((cls, body_variable)) = binding {
+                    if !self.type_mapping.contains_key(cls) {
+                        return Err(name[0].to_err(&format!("Undeclared variable type '{}'.", cls)).into())
+                    }
                     self.type_mapping[cls].iter().map(|class_variable| Some((String::from(body_variable), class_variable.clone()))).collect()
                 } else {
                     vec![None] // Forces the next for loop to iterate at least once
@@ -211,6 +217,9 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
                                     Err(e) => errors.push(Error::Parser(Some(String::from(*filepath)), e)),
                                 }
                             }
+                            if errors.len() > 0 {
+                                break;
+                            }
                             inc_compiler.pass += 1;
                         }
                         if errors.len() > 0 {
@@ -236,17 +245,21 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
     }
 
     fn visit_type(&mut self, class:&Token<'b>, body:&Stmt<'b>) -> Result<(), Error> {
-        if self.currently_building_type.is_none() {
-            let cls = class.unwrap_identifier();
-            self.currently_building_type = Some(String::from(cls));
-            if !self.type_mapping.contains_key(cls) {
-                self.type_mapping.insert(String::from(cls), Vec::new());
+        if self.pass == 0 {
+            if self.currently_building_type.is_none() {
+                let cls = class.unwrap_identifier();
+                self.currently_building_type = Some(String::from(cls));
+                if !self.type_mapping.contains_key(cls) {
+                    self.type_mapping.insert(String::from(cls), Vec::new());
+                }
+                body.accept(self)?;
+                self.currently_building_type = None;
+                Ok(())
+            } else {
+                Err(class.to_err("Unexpected second type statement inside of a previous type statement.").into())
             }
-            body.accept(self)?;
-            self.currently_building_type = None;
-            Ok(())
         } else {
-            Err(class.to_err("Unexpected second type statement inside of a previous type statement.").into())
+            Ok(())
         }
     }
 }
@@ -267,13 +280,15 @@ impl<'a, 'b> ExpressionVisitor<'b, Vec<Operation>, Error> for DomainCompiler<'a,
     fn visit_variable_expr(&mut self, var_path:&[Token<'b>]) -> Result<Vec<Operation>, Error> {
         if let Some(ref cls) = self.currently_building_type {
             if var_path.len() != 1 {
-                return Err(var_path[0].to_err("Unexpected '.' in type definition").into());
+                Err(var_path[0].to_err("Unexpected '.' in type definition").into())
             } else {
                 self.type_mapping.get_mut(cls).unwrap().push(String::from(var_path[0].unwrap_identifier()));
+                Ok(Vec::new())
             }
+        } else {
+            let idx = super::get_varpath_idx(self.compiler.substitution, var_path, &mut self.compiler.state_mapping);
+            Ok(vec![Operation::ReadBlackboard(idx)])
         }
-        let idx = super::get_varpath_idx(self.compiler.substitution, var_path, &mut self.compiler.state_mapping);
-        Ok(vec![Operation::ReadBlackboard(idx)])
     }
 
     fn visit_unary_expr(&mut self, token: &Token<'b>, right: &Expr<'b>) -> Result<Vec<Operation>, Error> {
@@ -556,6 +571,422 @@ mod tests {
                 planning: vec![],
                 is_method: false,
                 wants: HashMap::new(),
+                provides: HashMap::new(),
+            },
+        ]);
+    }
+
+    #[test]
+    fn test_hashmap_typing() {
+        let code = "task t1:\n\ttask s1(cell.is_empty) for Cell as cell:\n\t\tops1()\n\ttask s2(block.is_empty) for Block as block:\n\t\tops2()";
+        let mut state_mapping = HashMap::new();
+        let mut blackboard_mapping = HashMap::new();
+        let mut task_mapping = HashMap::new();
+        let mut operator_mapping = HashMap::new();
+        let mut type_mapping = HashMap::from([("Cell".to_owned(), vec!["a1".to_owned(), "a2".to_owned()]), ("Block".to_owned(), vec!["b1".to_owned(), "b2".to_owned()])]);
+        let mut compiler = DomainCompiler::new(&mut blackboard_mapping, &mut task_mapping, &mut operator_mapping, &mut type_mapping, &mut state_mapping);
+        while compiler.pass < DomainCompiler::MAX_PASSES {
+            for stmt in Parser::new(code) {
+                stmt.expect("Unexpected parsing error").accept(&mut compiler).expect("Unexpected compilation error in unit-tests");
+            }
+            compiler.pass += 1;
+        }
+
+        let tasks = compiler.finish();
+        assert_eq!(task_mapping, HashMap::from([("t1".to_owned(), 0), ("t1.s1_for_a1".to_owned(), 1), ("t1.s1_for_a2".to_owned(), 2), ("t1.s2_for_b1".to_owned(), 3), ("t1.s2_for_b2".to_owned(), 4)]));
+        assert_eq!(state_mapping, HashMap::from([("a1.is_empty".to_owned(), 0), ("a2.is_empty".to_owned(), 1), ("b1.is_empty".to_owned(), 2), ("b2.is_empty".to_owned(), 3)]));
+        assert_eq!(blackboard_mapping, HashMap::new());
+        assert_eq!(operator_mapping, HashMap::from([("ops1".to_owned(), 0), ("ops2".to_owned(), 1)]));
+        assert_eq!(tasks, vec![
+            Task{
+                preconditions: vec![Push(B(true))], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Composite(vec![1, 2, 3, 4]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: false,
+                wants: HashMap::new(),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(0)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(0, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(0, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(1)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(0, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(1, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(2)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(1, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(2, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(3)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(1, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(3, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+        ]);
+    }
+
+    #[test]
+    fn test_type_statement() {
+        let code = "type Cell:\n\ta1\n\ta2\n";
+        let mut state_mapping = HashMap::new();
+        let mut blackboard_mapping = HashMap::new();
+        let mut task_mapping = HashMap::new();
+        let mut operator_mapping = HashMap::new();
+        let mut type_mapping = HashMap::new();
+        let mut compiler = DomainCompiler::new(&mut blackboard_mapping, &mut task_mapping, &mut operator_mapping, &mut type_mapping, &mut state_mapping);
+        while compiler.pass < DomainCompiler::MAX_PASSES {
+            for stmt in Parser::new(code) {
+                stmt.expect("Unexpected parsing error").accept(&mut compiler).expect("Unexpected compilation error in unit-tests");
+            }
+            compiler.pass += 1;
+        }
+
+        let tasks = compiler.finish();
+        assert_eq!(type_mapping, HashMap::from([("Cell".to_owned(), vec!["a1".to_owned(), "a2".to_owned()])]));
+        assert_eq!(task_mapping, HashMap::new());
+        assert_eq!(state_mapping, HashMap::new());
+        assert_eq!(blackboard_mapping, HashMap::new());
+        assert_eq!(operator_mapping, HashMap::new());
+        assert_eq!(tasks, Vec::new());
+    }
+
+    #[test]
+    fn test_source_typing() {
+        let code = "type Cell:\n\ta1\n\ta2\ntype Block:\n\tb1\n\tb2\ntask t1:\n\ttask s1(cell.is_empty) for Cell as cell:\n\t\tops1()\n\ttask s2(block.is_empty) for Block as block:\n\t\tops2()";
+        let mut state_mapping = HashMap::new();
+        let mut blackboard_mapping = HashMap::new();
+        let mut task_mapping = HashMap::new();
+        let mut operator_mapping = HashMap::new();
+        let mut type_mapping = HashMap::new();
+        let mut compiler = DomainCompiler::new(&mut blackboard_mapping, &mut task_mapping, &mut operator_mapping, &mut type_mapping, &mut state_mapping);
+        while compiler.pass < DomainCompiler::MAX_PASSES {
+            for stmt in Parser::new(code) {
+                stmt.expect("Unexpected parsing error").accept(&mut compiler).expect("Unexpected compilation error in unit-tests");
+            }
+            compiler.pass += 1;
+        }
+
+        let tasks = compiler.finish();
+        assert_eq!(type_mapping, HashMap::from([("Block".to_owned(), vec!["b1".to_owned(), "b2".to_owned()]), ("Cell".to_owned(), vec!["a1".to_owned(), "a2".to_owned()])]));
+        assert_eq!(task_mapping, HashMap::from([("t1".to_owned(), 0), ("t1.s1_for_a1".to_owned(), 1), ("t1.s1_for_a2".to_owned(), 2), ("t1.s2_for_b1".to_owned(), 3), ("t1.s2_for_b2".to_owned(), 4)]));
+        assert_eq!(state_mapping, HashMap::from([("a1.is_empty".to_owned(), 0), ("a2.is_empty".to_owned(), 1), ("b1.is_empty".to_owned(), 2), ("b2.is_empty".to_owned(), 3)]));
+        assert_eq!(blackboard_mapping, HashMap::new());
+        assert_eq!(operator_mapping, HashMap::from([("ops1".to_owned(), 0), ("ops2".to_owned(), 1)]));
+        assert_eq!(tasks, vec![
+            Task{
+                preconditions: vec![Push(B(true))], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Composite(vec![1, 2, 3, 4]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: false,
+                wants: HashMap::new(),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(0)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(0, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(0, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(1)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(0, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(1, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(2)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(1, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(2, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(3)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(1, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(3, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+        ]);
+    }
+
+    #[test]
+    fn test_single_typing() {
+        let code = "task t1:\n\ttask s1(cell.is_empty) for Cell as cell:\n\t\tops1()\n\ttask s2(block.is_empty) for Block as block:\n\t\tops2()";
+        let mut state_mapping = HashMap::new();
+        let mut blackboard_mapping = HashMap::new();
+        let mut task_mapping = HashMap::new();
+        let mut operator_mapping = HashMap::new();
+        let mut type_mapping = HashMap::from([("Cell".to_owned(), vec!["a1".to_owned()]), ("Block".to_owned(), vec!["b1".to_owned()])]);
+        let mut compiler = DomainCompiler::new(&mut blackboard_mapping, &mut task_mapping, &mut operator_mapping, &mut type_mapping, &mut state_mapping);
+        while compiler.pass < DomainCompiler::MAX_PASSES {
+            for stmt in Parser::new(code) {
+                stmt.expect("Unexpected parsing error").accept(&mut compiler).expect("Unexpected compilation error in unit-tests");
+            }
+            compiler.pass += 1;
+        }
+
+        let tasks = compiler.finish();
+        assert_eq!(task_mapping, HashMap::from([("t1".to_owned(), 0), ("t1.s1_for_a1".to_owned(), 1), ("t1.s2_for_b1".to_owned(), 2)]));
+        assert_eq!(state_mapping, HashMap::from([("a1.is_empty".to_owned(), 0), ("b1.is_empty".to_owned(), 1)]));
+        assert_eq!(blackboard_mapping, HashMap::new());
+        assert_eq!(operator_mapping, HashMap::from([("ops1".to_owned(), 0), ("ops2".to_owned(), 1)]));
+        assert_eq!(tasks, vec![
+            Task{
+                preconditions: vec![Push(B(true))], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Composite(vec![1, 2]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: false,
+                wants: HashMap::new(),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(0)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(0, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(0, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(1)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(1, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(1, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            }
+        ]);
+    }
+
+    #[test]
+    fn test_planning() {
+        let code = "task t1:\n\top()\nplanning:\n\tpop()";
+        let mut state_mapping = HashMap::new();
+        let mut blackboard_mapping = HashMap::new();
+        let mut task_mapping = HashMap::new();
+        let mut operator_mapping = HashMap::new();
+        let mut type_mapping = HashMap::new();
+        let mut compiler = DomainCompiler::new(&mut blackboard_mapping, &mut task_mapping, &mut operator_mapping, &mut type_mapping, &mut state_mapping);
+        while compiler.pass < DomainCompiler::MAX_PASSES {
+            for stmt in Parser::new(code) {
+                stmt.expect("Unexpected parsing error").accept(&mut compiler).expect("Unexpected compilation error in unit-tests");
+            }
+            compiler.pass += 1;
+        }
+
+        let tasks = compiler.finish();
+        assert_eq!(task_mapping, HashMap::from([("t1".to_owned(), 0)]));
+        assert_eq!(state_mapping, HashMap::new());
+        assert_eq!(blackboard_mapping, HashMap::new());
+        assert_eq!(operator_mapping, HashMap::from([("pop".to_owned(), 0), ("op".to_owned(), 1)]));
+        assert_eq!(tasks, vec![
+            Task{
+                preconditions: vec![Push(B(true))], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(1,0)]), 
+                effects: vec![], 
+                planning: vec![CallOperator(0, 0)],
+                is_method: false,
+                wants: HashMap::new(),
+                provides: HashMap::new(),
+            },
+        ]);
+    }
+
+    #[test]
+    fn test_typed_planning_parent_task() {
+        let code = "task t1:\n\ttask s1(cell.is_empty) for Cell as cell:\n\t\tops1()\n\ttask s2(block.is_empty) for Block as block:\n\t\tops2()\nplanning:\n\tpop()";
+        let mut state_mapping = HashMap::new();
+        let mut blackboard_mapping = HashMap::new();
+        let mut task_mapping = HashMap::new();
+        let mut operator_mapping = HashMap::new();
+        let mut type_mapping = HashMap::from([("Cell".to_owned(), vec!["a1".to_owned(), "a2".to_owned()]), ("Block".to_owned(), vec!["b1".to_owned(), "b2".to_owned()])]);
+        let mut compiler = DomainCompiler::new(&mut blackboard_mapping, &mut task_mapping, &mut operator_mapping, &mut type_mapping, &mut state_mapping);
+        while compiler.pass < DomainCompiler::MAX_PASSES {
+            for stmt in Parser::new(code) {
+                stmt.expect("Unexpected parsing error").accept(&mut compiler).expect("Unexpected compilation error in unit-tests");
+            }
+            compiler.pass += 1;
+        }
+
+        let tasks = compiler.finish();
+        assert_eq!(task_mapping, HashMap::from([("t1".to_owned(), 0), ("t1.s1_for_a1".to_owned(), 1), ("t1.s1_for_a2".to_owned(), 2), ("t1.s2_for_b1".to_owned(), 3), ("t1.s2_for_b2".to_owned(), 4)]));
+        assert_eq!(state_mapping, HashMap::from([("a1.is_empty".to_owned(), 0), ("a2.is_empty".to_owned(), 1), ("b1.is_empty".to_owned(), 2), ("b2.is_empty".to_owned(), 3)]));
+        assert_eq!(blackboard_mapping, HashMap::new());
+        assert_eq!(operator_mapping, HashMap::from([("pop".to_owned(), 0), ("ops1".to_owned(), 1), ("ops2".to_owned(), 2)]));
+        assert_eq!(tasks, vec![
+            Task{
+                preconditions: vec![Push(B(true))], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Composite(vec![1, 2, 3, 4]), 
+                effects: vec![], 
+                planning: vec![CallOperator(0, 0)],
+                is_method: false,
+                wants: HashMap::new(),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(0)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(1, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(0, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(1)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(1, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(1, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(2)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(2, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(2, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(3)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(2, 0)]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: true,
+                wants: HashMap::from([(3, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+        ]);
+    }
+
+    #[test]
+    fn test_typed_planning_methods() {
+        let code = "task t1:\n\ttask s1(cell.is_empty) for Cell as cell:\n\t\tops1()\n\tplanning:\n\t\tpops1()\n\ttask s2(block.is_empty) for Block as block:\n\t\tops2()\n\tplanning:\n\t\tpops2()";
+        let mut state_mapping = HashMap::new();
+        let mut blackboard_mapping = HashMap::new();
+        let mut task_mapping = HashMap::new();
+        let mut operator_mapping = HashMap::new();
+        let mut type_mapping = HashMap::from([("Cell".to_owned(), vec!["a1".to_owned(), "a2".to_owned()]), ("Block".to_owned(), vec!["b1".to_owned(), "b2".to_owned()])]);
+        let mut compiler = DomainCompiler::new(&mut blackboard_mapping, &mut task_mapping, &mut operator_mapping, &mut type_mapping, &mut state_mapping);
+        while compiler.pass < DomainCompiler::MAX_PASSES {
+            for stmt in Parser::new(code) {
+                stmt.expect("Unexpected parsing error").accept(&mut compiler).expect("Unexpected compilation error in unit-tests");
+            }
+            compiler.pass += 1;
+        }
+
+        let tasks = compiler.finish();
+        assert_eq!(task_mapping, HashMap::from([("t1".to_owned(), 0), ("t1.s1_for_a1".to_owned(), 1), ("t1.s1_for_a2".to_owned(), 2), ("t1.s2_for_b1".to_owned(), 3), ("t1.s2_for_b2".to_owned(), 4)]));
+        assert_eq!(state_mapping, HashMap::from([("a1.is_empty".to_owned(), 0), ("a2.is_empty".to_owned(), 1), ("b1.is_empty".to_owned(), 2), ("b2.is_empty".to_owned(), 3)]));
+        assert_eq!(blackboard_mapping, HashMap::new());
+        assert_eq!(operator_mapping, HashMap::from([("pops1".to_owned(), 0), ("ops1".to_owned(), 1), ("pops2".to_owned(), 2), ("ops2".to_owned(), 3)]));
+        assert_eq!(tasks, vec![
+            Task{
+                preconditions: vec![Push(B(true))], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Composite(vec![1, 2, 3, 4]), 
+                effects: vec![], 
+                planning: vec![],
+                is_method: false,
+                wants: HashMap::new(),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(0)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(1, 0)]), 
+                effects: vec![], 
+                planning: vec![CallOperator(0, 0)],
+                is_method: true,
+                wants: HashMap::from([(0, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(1)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(1, 0)]), 
+                effects: vec![], 
+                planning: vec![CallOperator(0, 0)],
+                is_method: true,
+                wants: HashMap::from([(1, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(2)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(3, 0)]), 
+                effects: vec![], 
+                planning: vec![CallOperator(2, 0)],
+                is_method: true,
+                wants: HashMap::from([(2, Inertia::Item(B(true)))]),
+                provides: HashMap::new(),
+            },
+            Task{
+                preconditions: vec![ReadState(3)], 
+                cost: vec![Push(I(0))], 
+                body: TaskBody::Primitive(vec![CallOperator(3, 0)]), 
+                effects: vec![], 
+                planning: vec![CallOperator(2, 0)],
+                is_method: true,
+                wants: HashMap::from([(3, Inertia::Item(B(true)))]),
                 provides: HashMap::new(),
             },
         ]);
