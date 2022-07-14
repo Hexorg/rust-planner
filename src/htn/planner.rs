@@ -76,7 +76,7 @@ impl Planner {
     }
 
     fn add_primitive_task_operators<F>(&self, plan:&mut Plan, state:&mut State, stats:&mut Statistics, body:&Vec<Operation>, on_plan:&mut F) -> Result<bool, Error> 
-    where F: FnMut(&Vec<Operation>)->() {
+    where F: FnMut(&Vec<Operation>, &mut State)->() {
         let mut all = true;
         for op in body {
             all &= match op {
@@ -95,7 +95,7 @@ impl Planner {
 
 
     fn run_astar<F>(&self, plan:&mut Plan, state:&mut State, stats:&mut Statistics, task_id:usize, on_plan:&mut F) -> Result<bool, Error> 
-    where F: FnMut(&Vec<Operation>)->() { 
+    where F: FnMut(&Vec<Operation>, &mut State)->() { 
         if plan.0.len() > 40 && task_id == self.domain.main_id() {
             return Ok(true)
         }
@@ -103,12 +103,12 @@ impl Planner {
         let mut goal_state = state.clone();
         goal_state.admit(task.wants());
         let heuristic = |node:&Node| node.state.manhattan_distance(&goal_state);
- 
+        on_plan(&task.planning, state);
         if let Some((task_plan, _task_plan_cost)) = a_star(Node::new(state, usize::MAX), &task.preconditions, heuristic, self, stats) {
             for subtask in task_plan {
                 self.run_astar(plan, state, stats, subtask, on_plan)?;
             }
-            on_plan(&task.planning);
+            
             match &task.body {
                 TaskBody::Primitive(ops) => {let r = self.add_primitive_task_operators(plan, state, stats, ops, on_plan);
                     state.eval_mut(&task.effects);
@@ -148,7 +148,7 @@ impl Planner {
     }
 
     pub fn plan<F>(&self, state:&State, on_plan:&mut F) -> Result<Plan, Error> 
-    where F: FnMut(&Vec<Operation>)->() {
+    where F: FnMut(&Vec<Operation>, &mut State)->() {
         let mut plan = Plan(Vec::new());
         let mut state = state.clone();
         let mut stats = Statistics::new();

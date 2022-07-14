@@ -15,7 +15,19 @@ impl std::clone::Clone for State<'_> {
     }
 }
 
+impl std::ops::Index<usize> for State<'_> {
+    type Output = OperandType;
 
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.data[index]
+    }
+}
+
+impl std::ops::IndexMut<usize> for State<'_> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.data[index]
+    }
+}
 
 impl std::hash::Hash for State<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

@@ -50,10 +50,11 @@ fn main() {
             pos += 2;
         }
 
-        let plan = planner.plan(&state, &mut |_| ()).unwrap();
-        println!("Planer finished successfully. Plan: {:?}\nDecompiled plan:", plan);
         let blackboard = planner.domain.blackboard_vec();
         let operators = planner.domain.operator_vec();
+
+        let plan = planner.plan(&state, &mut |ops, _state| for op in ops { match op { htn::compiler::Operation::CallOperator(idx, _) => println!("on_plan calling {}()", operators[*idx]), _=>() }}).unwrap();
+        println!("Plan: {:?}\nDecompiled plan:", plan);
         let mut stack = Vec::new();
         for op in plan.0 {
             match op {
