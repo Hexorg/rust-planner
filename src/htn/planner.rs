@@ -84,7 +84,7 @@ impl Planner {
                 Operation::WriteBlackboard(_) |
                 Operation::CallOperator(_, _) => {plan.0.push(*op); Ok(true)},
                 Operation::PlanTask(task_id) => self.run_astar(plan, state, stats, *task_id, on_plan),
-                _ => Err(Error("Unexpected primitive task body operation.".to_owned())),
+                _ => Err(Error(format!("Unexpected primitive task body operation: {:?}.", op))),
             }?;
             if !all {
                 break;

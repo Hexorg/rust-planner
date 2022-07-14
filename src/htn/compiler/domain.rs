@@ -267,11 +267,11 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
                         if errors.len() > 0 {
                             Err(Error::FromFile(String::from(*filepath), errors))
                         } else {
-                            // let tn = std::mem::take(&mut self.task_names);
-                            // inc_compiler.task_names.extend(tn);
+                            let fqdns = std::mem::take(&mut self.fqdns);
+                            inc_compiler.fqdns.extend(fqdns);
                             let t = std::mem::take(&mut self.tasks);
                             inc_compiler.tasks.extend(t);
-                            // self.task_names = inc_compiler.task_names;
+                            self.fqdns = inc_compiler.fqdns;
                             self.tasks = inc_compiler.tasks;
                             Ok(())
                         }
@@ -338,7 +338,8 @@ impl<'a, 'b> ExpressionVisitor<'b, Vec<Operation>, Error> for DomainCompiler<'a,
                 Ok(vec![Operation::ReadBlackboard(idx)])
             }
         } else  {
-            self.compiler.visit_variable_expr(var_path)
+            let idx = super::get_varpath_idx(self.compiler.substitution, var_path, &mut self.compiler.state_mapping);
+            Ok(vec![Operation::ReadBlackboard(idx)])
         }
     }
 
