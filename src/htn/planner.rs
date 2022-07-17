@@ -117,6 +117,7 @@ impl Planner {
                     let mut method_plans = PriorityQueue::new();
                     for method_id in methods {
                         let method = &self.domain.tasks()[*method_id];
+                        on_plan(&method.planning, state);
                         if let Some((mut method_plan, method_plan_cost)) = a_star(Node::new(state, usize::MAX), &method.preconditions, heuristic, self, stats) {
                             method_plan.push(*method_id);
                             let cost = if let OperandType::I(v) = state.eval(&method.cost).unwrap() { v } else { 0 };
