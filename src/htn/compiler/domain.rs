@@ -214,7 +214,7 @@ impl<'a, 'b> StatementVisitor<'b, (), Error> for DomainCompiler<'a, 'b> {
             self.parent_task = my_parent_task;
 
             if self.pass == 1 {
-                if self.operations.len() > 0 {
+                if self.operations.len() > 0 || self.methods.len() == 0 { // operations and methods may have 0 elements if body is `pass`
                     self.tasks[my_id].body = TaskBody::Primitive(std::mem::take(&mut self.operations));
                     if self.parent_task.is_some() {
                         self.methods.push(my_id)
@@ -409,8 +409,8 @@ impl<'a, 'b> ExpressionVisitor<'b, Vec<Operation>, Error> for DomainCompiler<'a,
         }
     }
 
-    fn visit_nop_expr(&mut self, token: &Token) -> Result<Vec<Operation>, Error> {
-        Err(token.to_err("Can not use pass expression in this context.").into())
+    fn visit_nop_expr(&mut self, _token: &Token) -> Result<Vec<Operation>, Error> {
+        Ok(Vec::new())
     }
 }
 
