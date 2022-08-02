@@ -405,6 +405,9 @@ impl<'a, 'b> ExpressionVisitor<'b, Vec<Operation>, Error> for DomainCompiler<'a,
             }
             Ok(bytecode)
         } else {
+            for arg in args {
+                arg.accept(self)?;
+            }
             Ok(Vec::new())
         }
     }
