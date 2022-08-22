@@ -1,0 +1,23 @@
+task transport(package):
+    when:
+        package.at(x) and package.destination == y and truck.available
+    ordered:
+        truck.dispatch(x)
+        truck.load(package)
+        truck.move(x, y)
+        truck.return(x)
+
+task dispatch(dest):
+    ordered:
+        truck.reserve()
+        truck.move(home, dest)
+
+task truck.return(x):
+    ordered:
+        truck.move(x, home)
+        truck.free()
+
+task transport_two(p1, p2):
+    when p1.is_package() and p2.is_package()
+    transport(p1) # default unordered
+    transport(p2)
