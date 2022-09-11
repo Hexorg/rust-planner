@@ -1,9 +1,9 @@
 use std::iter::Peekable;
 use std::str::CharIndices;
 
-use super::tokens::{Token, TokenData, Literal};
+use super::tokens::{Token, Span, TokenKind, Literal};
 use super::Error;
-use TokenData::*;
+use TokenKind::*;
 #[derive(Debug, PartialEq)]
 enum DepthSeparator {
     TABS,
@@ -47,44 +47,44 @@ impl<'a> Iterator for Lexer<'a> {
             if let Some((offset, c)) = self.next_char() {
                 // println!("Consumed up to: line:{} col:{} offset:{} char:{:?}", self.line, self.col, offset, c);
                 let mut new_token = match c {
-                    ':' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Colon})),
-                    '(' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:OpenParenthesis})),
-                    ')' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:CloseParenthesis})),
-                    ',' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Comma})),
-                    '|' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Or})),
-                    '&' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:And})),
-                    '.' => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Dot})),
+                    ':' => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Colon})),
+                    '(' => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:OpenParenthesis})),
+                    ')' => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:CloseParenthesis})),
+                    ',' => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Comma})),
+                    '|' => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Or})),
+                    '&' => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:And})),
+                    '.' => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Dot})),
                     '=' => match self.it.peek() {
-                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:EqualsEquals}; self.it.next(); Some(Ok(t))}
-                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Equals})),
+                        Some((_, '=')) => {let t = Token{span:Span::new(self.line, self.col, 2), kind:EqualsEquals}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Equals})),
                     },
                     '-' => match self.it.peek() {
-                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:SubtractFrom}; self.it.next(); Some(Ok(t))}
-                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Minus})),
+                        Some((_, '=')) => {let t = Token{span:Span::new(self.line, self.col, 2), kind:SubtractFrom}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Minus})),
                     },
                     '+' => match self.it.peek() {
-                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:AddTo}; self.it.next(); Some(Ok(t))}
-                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Plus})),
+                        Some((_, '=')) => {let t = Token{span:Span::new(self.line, self.col, 2), kind:AddTo}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Plus})),
                     },
                     '/' => match self.it.peek() {
-                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:DivideBy}; self.it.next(); Some(Ok(t))}
-                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Slash})),
+                        Some((_, '=')) => {let t = Token{span:Span::new(self.line, self.col, 2), kind:DivideBy}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Slash})),
                     },
                     '*' => match self.it.peek() {
-                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:MultiplyBy}; self.it.next(); Some(Ok(t))}
-                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Star})),
+                        Some((_, '=')) => {let t = Token{span:Span::new(self.line, self.col, 2), kind:MultiplyBy}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Star})),
                     },
                     '>' => match self.it.peek() {
-                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:GreaterOrEquals}; self.it.next(); Some(Ok(t))}
-                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Greater})),
+                        Some((_, '=')) => {let t = Token{span:Span::new(self.line, self.col, 2), kind:GreaterOrEquals}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Greater})),
                     },
                     '<' => match self.it.peek() {
-                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:SmallerOrEquals}; self.it.next(); Some(Ok(t))}
-                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Smaller})),
+                        Some((_, '=')) => {let t = Token{span:Span::new(self.line, self.col, 2), kind:SmallerOrEquals}; self.it.next(); Some(Ok(t))}
+                        _ => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:Smaller})),
                     },
                     '!' => match self.it.peek() {
-                        Some((_, '=')) => {let t = Token{line:self.line, col:self.col, len:2, t:NotEquals}; self.it.next(); Some(Ok(t))},
-                        _ => Some(Ok(Token{line:self.line, col:self.col, len:1, t:Not}))
+                        Some((_, '=')) => {let t = Token{span:Span::new(self.line, self.col, 2), kind:NotEquals}; self.it.next(); Some(Ok(t))},
+                        _ => Some(Ok(Token{span:Span::new(self.line, self.col, 1), kind:ExclamationPoint}))
                     },
                     '"' => {Some(self.string(offset))},
                     c if c.is_whitespace() => if self.is_newline { 
@@ -105,30 +105,30 @@ impl<'a> Iterator for Lexer<'a> {
                         },
                     c if (c.is_alphabetic() || c == '_') => Some(self.identifier(offset)),
                     c if c.is_digit(10) => Some(self.number(offset)),
-                    _ => {let e = Some(Err(Error{line:self.line, col:self.col, message:"Unexpected character.".to_owned()})); e}
+                    _ => {let e = Some(Err(Error::new(Span::new(self.line, self.col, 1), "Unexpected character."))); e}
                 };
                 if let Some(result) = &new_token {
                     match result {
-                        Ok(t) => self.col += t.len,
+                        Ok(t) => self.col += t.span.len,
                         Err(_) => self.col += 1,
                     }
                 }
                 if let Some((_, '\n')) | None  = self.it.peek() {
-                    if let Some(Token{t:StatementEnd,..}) = self.stash.last() { } else {
-                        self.stash.push(Token{line:self.line, col:self.col, len:0, t:StatementEnd});
+                    if let Some(Token{kind:StatementEnd,..}) = self.stash.last() { } else {
+                        self.stash.push(Token{span:Span::new(self.line, self.col, 0), kind:StatementEnd});
                     }
                 }
                 if let Some(Ok(token)) = new_token {
                     if self.is_newline && self.tab_depth > 0 {
                         match token { 
-                            Token{t:BlockStart,..} => (),
+                            Token{kind:BlockStart,..} => (),
                             _ => {
                                 self.stash.push(token); 
                                 // self.col -= token.len();
                                 self.tab_depth-=1; 
-                                new_token = Some(Ok(Token{line:self.line, col:0, len:0, t:BlockEnd}));
+                                new_token = Some(Ok(Token{span:Span::new(self.line, 0, 0), kind:BlockEnd}));
                                 while self.tab_depth > 0 {
-                                    self.stash.push(Token{line:self.line, col:0, len:0, t:BlockEnd});
+                                    self.stash.push(Token{span:Span::new(self.line, 0, 0), kind:BlockEnd});
                                     self.tab_depth -= 1;
                                 }
                             }
@@ -141,7 +141,7 @@ impl<'a> Iterator for Lexer<'a> {
             } else {
                 if self.tab_depth > 0 {
                     self.tab_depth -= 1;
-                    Some(Ok(Token{line:self.line, col:self.col, len:0, t:BlockEnd}))
+                    Some(Ok(Token{span:Span::new(self.line, self.col, 0), kind:BlockEnd}))
                 } else {
                     None
                 }
@@ -166,7 +166,7 @@ impl<'a> Lexer<'a> {
         let offset = offset + '"'.len_utf8();
         while let Some(_) = self.it.next_if(|(_,c)| *c != '"' ) { len += 1; }
         let slice = if let Some((string_end, _)) = self.it.next() { &self.text[offset..string_end] } else { &self.text[offset..]};
-        let r = Ok(Token{line:self.line, col:self.col, len, t:Literal(Literal::S(slice)), });
+        let r = Ok(Token{span:Span::new(self.line, self.col, len), kind:Literal(Literal::S(slice)), });
         self.col += 1; // count the last '"'
         r
     }
@@ -178,13 +178,13 @@ impl<'a> Lexer<'a> {
         let slice = if let Some((number_end, _)) = self.it.peek() { &self.text[offset..*number_end]} else { &self.text[offset..]};
         if contains_dot {
             match slice.parse::<f32>() {
-                Ok(literal) => Ok(Token{line:self.line, col:self.col, len, t:Literal(Literal::F(literal))}),
-                Err(_) => Err(Error{line:self.line, col:self.col, message:"Unable to parse float.".to_string()})
+                Ok(literal) => Ok(Token{span:Span::new(self.line, self.col, len), kind:Literal(Literal::F(literal))}),
+                Err(_) => Err(Error::new(Span::new(self.line, self.col, 1), "Unable to parse float."))
             }
         } else {
             match slice.parse::<i32>() {
-                Ok(literal) => Ok(Token{line:self.line, col:self.col, len, t:Literal(Literal::I(literal))}),
-                Err(_) => Err(Error{line:self.line, col:self.col, message:"Unable to parse integer.".to_string()})
+                Ok(literal) => Ok(Token{span:Span::new(self.line, self.col, len), kind:Literal(Literal::I(literal))}),
+                Err(_) => Err(Error::new(Span::new(self.line, self.col, 1), "Unable to parse integer."))
             }
         }
     }
@@ -194,22 +194,22 @@ impl<'a> Lexer<'a> {
         while let Some(_) = self.it.next_if(|(_,c)| (c.is_alphanumeric() || *c == '_')) { len += 1; }
         let slice = if let Some((identifier_end,_)) = self.it.peek() { &self.text[offset..*identifier_end]} else { &self.text[offset..]};
         let token = match slice {
-            "task" => Ok(Token{line:self.line, col:self.col, len, t:Task}),
-            "planning" => Ok(Token{line:self.line, col:self.col, len, t:Planning}),
-            "else" => Ok(Token{line:self.line, col:self.col, len, t:Else}),
-            "effects" => Ok(Token{line:self.line, col:self.col, len, t:Effects}),
-            "include" => Ok(Token{line:self.line, col:self.col, len, t:Include}),
-            "pass" => Ok(Token{line:self.line, col:self.col, len, t:Pass}),
-            "cost" => Ok(Token{line:self.line, col:self.col, len, t:Cost}),
-            "or" => Ok(Token{line:self.line, col:self.col, len, t:Or}),
-            "and" => Ok(Token{line:self.line, col:self.col, len, t:And}),
-            "not" => Ok(Token{line:self.line, col:self.col, len, t:Not}),
-            "for" => Ok(Token{line:self.line, col:self.col, len, t:For}),
-            "as" => Ok(Token{line:self.line, col:self.col, len, t:As}),
-            "type" => Ok(Token{line:self.line, col:self.col, len, t:Type}),
-            "false" => Ok(Token{line:self.line, col:self.col, len, t:Literal(Literal::B(false))}),
-            "true" => Ok(Token{line:self.line, col:self.col, len, t:Literal(Literal::B(true))}),
-            _ => Ok(Token{line:self.line, col:self.col, len, t:Identifier(slice)})
+            "task" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Task}),
+            "when" => Ok(Token{span:Span::new(self.line, self.col, len), kind:When}),
+            "else" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Else}),
+            "do" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Do}),
+            "def" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Def}),
+            "ordered" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Ordered}),
+            "on" => Ok(Token{span:Span::new(self.line, self.col, len), kind:On}),
+            "include" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Include}),
+            "pass" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Pass}),
+            "cost" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Cost}),
+            "or" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Or}),
+            "and" => Ok(Token{span:Span::new(self.line, self.col, len), kind:And}),
+            "not" => Ok(Token{span:Span::new(self.line, self.col, len), kind:ExclamationPoint}),
+            "false" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Literal(Literal::B(false))}),
+            "true" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Literal(Literal::B(true))}),
+            _ => Ok(Token{span:Span::new(self.line, self.col, len), kind:Identifier(slice)})
         };
         token
     }
@@ -228,7 +228,7 @@ impl<'a> Lexer<'a> {
                 (true, false) => self.tabs(len),
                 (false, true) => self.spaces(len),
                 (true, true) |
-                (false, false) => Some(Error{line:self.line, col:self.col, message:"Only tabs or spaces are allowed at the beginning of the line.".to_owned()}),
+                (false, false) => Some(Error::new(Span::new(self.line, self.col, 1), "Only tabs or spaces are allowed at the beginning of the line.")),
             }
         }
     }
@@ -244,17 +244,17 @@ impl<'a> Lexer<'a> {
                 self.col += count;
             }
             while self.tab_depth < count {
-                self.stash.push(Token{line:self.line, col:self.col, len:1, t:BlockStart});
+                self.stash.push(Token{span:Span::new(self.line, self.col, 1), kind:BlockStart});
                 self.col += 1;
                 self.tab_depth += 1;
             }
             while self.tab_depth > count {
-                self.stash.push(Token{line:self.line, col:0, len:0, t:BlockEnd});
+                self.stash.push(Token{span:Span::new(self.line, 0, 0), kind:BlockEnd});
                 self.tab_depth -= 1;
             }
             return None
         }
-        return Some(Error{line:self.line, col:self.col, message:"Expected spaces at the beginning of the line.".to_owned()})
+        return Some(Error::new(Span::new(self.line, self.col, 1), "Expected spaces at the beginning of the line."))
     }
 
     fn spaces(&mut self, count:usize) -> Option<Error> {
@@ -263,7 +263,7 @@ impl<'a> Lexer<'a> {
         }
         if let Some(DepthSeparator::SPACES(one_depth)) = self.depth_separator {
             if count % one_depth != 0 {
-                return Some(Error{line:self.line, col:self.col, message:format!("Extra spaces. Expected {}.", one_depth)})
+                return Some(Error::new(Span::new(self.line, self.col, count), &format!("Extra spaces. Expected {}.", one_depth)))
             }
             let count = count / one_depth;
             if self.tab_depth <= count {
@@ -272,17 +272,17 @@ impl<'a> Lexer<'a> {
                 self.col += count*one_depth;
             }
             while self.tab_depth < count {
-                self.stash.push(Token{line:self.line, col:self.col, len:one_depth, t:BlockStart});
+                self.stash.push(Token{span:Span::new(self.line, self.col, one_depth), kind:BlockStart});
                 self.col += one_depth;
                 self.tab_depth += 1;
             }
             while self.tab_depth > count {
-                self.stash.push(Token{line:self.line, col:0, len:0, t:BlockEnd});
+                self.stash.push(Token{span:Span::new(self.line, 0, 0), kind:BlockEnd});
                 self.tab_depth -= 1;
             }
             return None
         }
-        return Some(Error{line:self.line, col:self.col, message:"Expected tabs at the beginning of the line.".to_owned()})
+        return Some(Error::new(Span::new(self.line, self.col, 1), "Expected tabs at the beginning of the line."))
     }
 }
 
@@ -290,14 +290,14 @@ impl<'a> Lexer<'a> {
 mod tests {
     use crate::htn::parser::{lexer::DepthSeparator, Error};
 
-    use super::{Lexer, Token, TokenData::*, Literal::*};
+    use super::{Lexer, Token, Span, TokenKind::*, Literal::*};
     #[test]
     fn test_include() {
         let code = "include \"str\"";
         let mut l = Lexer::new(code);
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:7, t:Include})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:10, len:3, t:Literal(S("str"))})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:14, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 1, 7), kind:Include})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 10, 3), kind:Literal(S("str"))})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 14, 0), kind:StatementEnd})));
         assert_eq!(l.next(), None);
     }
 
@@ -305,8 +305,8 @@ mod tests {
     fn test_comments() {
         let code = "# haha\n  # haha\n\ntask";
         let mut l = Lexer::new(code);
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:1, len:4, t:Task})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:5, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 1, 4), kind:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 5, 0), kind:StatementEnd})));
         assert_eq!(l.next(), None);
         assert_eq!(l.depth_separator, None);
     }
@@ -315,19 +315,19 @@ mod tests {
     fn test_space_block() {
         let code = "  &\n    &\n  &\n&";
         let mut l = Lexer::new(code);
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:2, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 1, 2), kind:BlockStart})));
         assert_eq!(l.depth_separator, Some(DepthSeparator::SPACES(2)));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:3, len:1, t:And})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:4, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:3, len:2, t:BlockStart})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:5, len:1, t:And})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:6, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:0, len:0, t:BlockEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:3, len:1, t:And})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:4, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:0, len:0, t:BlockEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:1, len:1, t:And})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:2, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 3, 1), kind:And})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 4, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 3, 2), kind:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 5, 1), kind:And})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 6, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 0, 0), kind:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 3, 1), kind:And})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 4, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 0, 0), kind:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 1, 1), kind:And})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 2, 0), kind:StatementEnd})));
         assert_eq!(l.next(), None);
     }
 
@@ -335,19 +335,19 @@ mod tests {
     fn test_tab_block() {
         let code = "\t&\n\t\t&\n\t&\n&";
         let mut l = Lexer::new(code);
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:1, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 1, 1), kind:BlockStart})));
         assert_eq!(l.depth_separator, Some(DepthSeparator::TABS));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:2, len:1, t:And})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:3, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:1, t:BlockStart})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:3, len:1, t:And})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:4, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:0, len:0, t:BlockEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:2, len:1, t:And})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:3, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:0, len:0, t:BlockEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:1, len:1, t:And})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:2, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 2, 1), kind:And})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 3, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 2, 1), kind:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 3, 1), kind:And})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 4, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 0, 0), kind:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 2, 1), kind:And})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 3, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 0, 0), kind:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 1, 1), kind:And})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 2, 0), kind:StatementEnd})));
         assert_eq!(l.next(), None);
     }
 
@@ -355,14 +355,14 @@ mod tests {
     fn test_error_block() {
         let code = " &\n\t&";
         let mut l = Lexer::new(code);
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:1, t:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 1, 1), kind:BlockStart})));
         assert_eq!(l.depth_separator, Some(DepthSeparator::SPACES(1)));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:2, len:1, t:And})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:3, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Err(Error{line:2, col:1, message:"Expected spaces at the beginning of the line.".to_owned()})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:1, t:And})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:3, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:3, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 2, 1), kind:And})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 3, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Err(Error::new(Span::new(2, 1, 1), "Expected spaces at the beginning of the line."))));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 2, 1), kind:And})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 3, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 3, 0), kind:BlockEnd})));
         assert_eq!(l.next(), None);
     }
 
@@ -370,42 +370,25 @@ mod tests {
     fn test_double_block_end() {
         let code = "task Test:\n\ttask M1:\n\t\top()\ntask Two";
         let mut l = Lexer::new(code);
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:4, t:Task})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:6, len:4, t:Identifier("Test")})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:10, len:1, t:Colon})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:11, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:1, len:1, t:BlockStart})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:4, t:Task})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:7, len:2, t:Identifier("M1")})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:9, len:1, t:Colon})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:10, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:2, len:1, t:BlockStart})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:3, len:2, t:Identifier("op")})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:5, len:1, t:OpenParenthesis})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:6, len:1, t:CloseParenthesis})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:7, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:0, len:0, t:BlockEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:0, len:0, t:BlockEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:1, len:4, t:Task})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:6, len:3, t:Identifier("Two")})));
-        assert_eq!(l.next(), Some(Ok(Token{line:4, col:9, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), None);
-    }
-
-    #[test]
-    fn test_type() {
-        let code = "type Cell:\n\tc1\n\tc2";
-        let mut l = Lexer::new(code);
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:4, t:Type})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:6, len:4, t:Identifier("Cell")})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:10, len:1, t:Colon})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:11, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:1, len:1, t:BlockStart})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:2, len:2, t:Identifier("c1")})));
-        assert_eq!(l.next(), Some(Ok(Token{line:2, col:4, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:2, len:2, t:Identifier("c2")})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:4, len:0, t:StatementEnd})));
-        assert_eq!(l.next(), Some(Ok(Token{line:3, col:4, len:0, t:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 1, 4), kind:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 6, 4), kind:Identifier("Test")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 10, 1), kind:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 11, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 1, 1), kind:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 2, 4), kind:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 7, 2), kind:Identifier("M1")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 9, 1), kind:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 10, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 2, 1), kind:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 3, 2), kind:Identifier("op")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 5, 1), kind:OpenParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 6, 1), kind:CloseParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 7, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 0, 0), kind:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 0, 0), kind:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 1, 4), kind:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 6, 3), kind:Identifier("Two")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 9, 0), kind:StatementEnd})));
         assert_eq!(l.next(), None);
     }
 
@@ -413,20 +396,65 @@ mod tests {
     fn test_ops() {
         let code = "><-*/p=+!=<=>=!true";
         let mut l = Lexer::new(code);
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:1, len:1, t:Greater})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:2, len:1, t:Smaller})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:3, len:1, t:Minus})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:4, len:1, t:Star})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:5, len:1, t:Slash})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:6, len:1, t:Identifier("p")})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:7, len:1, t:Equals})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:8, len:1, t:Plus})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:9, len:2, t:NotEquals})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:11, len:2, t:SmallerOrEquals})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:13, len:2, t:GreaterOrEquals})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:15, len:1, t:Not})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:16, len:4, t:Literal(B(true))})));
-        assert_eq!(l.next(), Some(Ok(Token{line:1, col:20, len:0, t:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 1, 1), kind:Greater})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 2, 1), kind:Smaller})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 3, 1), kind:Minus})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 4, 1), kind:Star})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 5, 1), kind:Slash})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 6, 1), kind:Identifier("p")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 7, 1), kind:Equals})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 8, 1), kind:Plus})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 9, 2), kind:NotEquals})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 11, 2), kind:SmallerOrEquals})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 13, 2), kind:GreaterOrEquals})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 15, 1), kind:ExclamationPoint})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 16, 4), kind:Literal(B(true))})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 20, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), None);
+    }
+
+    #[test]
+    fn sample_task() {
+        let code = "task t(a):\n\twhen:\n\t\ta.p(x)\n\tdo:\n\t\tordered:\n\t\t\tg.f(x)";
+        let mut l = Lexer::new(code);
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 1, 4), kind:Task})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 6, 1), kind:Identifier("t")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 7, 1), kind:OpenParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 8, 1), kind:Identifier("a")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 9, 1), kind:CloseParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 10, 1), kind:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(1, 11, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 1, 1), kind:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 2, 4), kind:When})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 6, 1), kind:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(2, 7, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 2, 1), kind:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 3, 1), kind:Identifier("a")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 4, 1), kind:Dot})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 5, 1), kind:Identifier("p")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 6, 1), kind:OpenParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 7, 1), kind:Identifier("x")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 8, 1), kind:CloseParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(3, 9, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 0, 0), kind:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 2, 2), kind:Do})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 4, 1), kind:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(4, 5, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(5, 2, 1), kind:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(5, 3, 7), kind:Ordered})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(5, 10, 1), kind:Colon})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(5, 11, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 3, 1), kind:BlockStart})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 4, 1), kind:Identifier("g")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 5, 1), kind:Dot})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 6, 1), kind:Identifier("f")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 7, 1), kind:OpenParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 8, 1), kind:Identifier("x")})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 9, 1), kind:CloseParenthesis})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 10, 0), kind:StatementEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 10, 0), kind:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 10, 0), kind:BlockEnd})));
+        assert_eq!(l.next(), Some(Ok(Token{span:Span::new(6, 10, 0), kind:BlockEnd})));
         assert_eq!(l.next(), None);
     }
 }

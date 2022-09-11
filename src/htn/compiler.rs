@@ -3,6 +3,9 @@ use std::collections::HashMap;
 
 use super::parser::{self, tokens::{Token, TokenData, Literal}};
 
+/* Based on https://www.cs.utexas.edu/~chiu/papers/Nau03shop2.pdf */
+
+
 #[derive(Debug)]
 pub enum Error {
     Parser(Option<String>, parser::Error),
@@ -211,6 +214,8 @@ pub enum Operation {
     PlanTask(usize),
     CallOperator(usize, usize), // (operator_id, arity)
 }
+
+
 
 #[derive(Debug, PartialEq)]
 pub enum TaskBody {
