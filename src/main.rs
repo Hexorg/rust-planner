@@ -15,13 +15,11 @@ use htn::planner::Planner;
 // }
 
 fn main() {
-    let type_map = HashMap::<&str, Vec<&str>>::new();
-    //type_map.insert("Cell", vec!["cell0", "cell1", "cell2", "cell3", "cell4", "cell5", "cell6"]);
     let args:Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} path/to/htn [initial_state_key initial_state_value [k v]]", args[0]);
     } else {
-        let domain = match Domain::from_file(&args[1], type_map) {
+        let domain = match Domain::from_file(&args[1], HashMap::new()) {
             Ok(domain) => domain,
             Err(e) => {eprintln!("{}", e); panic!()},
         };

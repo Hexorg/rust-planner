@@ -166,7 +166,7 @@ impl Inertia {
             (Inertia::Depends(_, _), Inertia::GreaterOrEquals(_)) => todo!(),
             (Inertia::Depends(_, _), Inertia::Smaller(_)) => todo!(),
             (Inertia::Depends(_, _), Inertia::SmallerOrEquals(_)) => todo!(),
-            (Inertia::Depends(_, _), Inertia::Depends(_, _)) => todo!(),
+            (Inertia::Depends(_, _), Inertia::Depends(_, _)) => Ok(Inertia::Some),
             (Inertia::Depends(_, _), Inertia::Fluent) => todo!(),
             (Inertia::Depends(_, _), Inertia::Some) => todo!(),
             (Inertia::Depends(_, _), Inertia::None) => todo!(),
@@ -300,7 +300,47 @@ pub fn build_provides(effects:&Vec<Operation>, wants:&HashMap<usize, Inertia>) -
                     todo!("Reason about subtracting variable from something.")
                 }
             },
-            Operation::Add => todo!(),
+            Operation::Add => {
+                if let Inertia::Item(subtracting) = stack.pop().unwrap() {
+                let from = stack.pop().unwrap();
+                    match from {
+                        Inertia::Item(val) => stack.push(Inertia::Item(val+subtracting)),
+                        Inertia::NotItem(val) => stack.push(Inertia::NotItem(val+subtracting)),
+                        Inertia::Greater(val) => stack.push(Inertia::Greater(val+subtracting)),
+                        Inertia::GreaterOrEquals(val) => stack.push(Inertia::GreaterOrEquals(val+subtracting)),
+                        Inertia::Smaller(val) => stack.push(Inertia::Smaller(val+subtracting)),
+                        Inertia::SmallerOrEquals(val) => stack.push(Inertia::SmallerOrEquals(val+subtracting)),
+                        Inertia::Depends(dop, Some(idx)) =>match dop {
+                            Operation::ReadState(_) => todo!(),
+                            Operation::WriteState(_) => todo!(),
+                            Operation::Push(_) => todo!(),
+                            Operation::Equals => stack.push(Inertia::Depends(Operation::Add, Some(idx))),
+                            Operation::Greater => todo!(),
+                            Operation::Smaller => todo!(),
+                            Operation::GreaterOrEquals => todo!(),
+                            Operation::SmallerOrEquals => todo!(),
+                            Operation::Not => todo!(),
+                            Operation::And => todo!(),
+                            Operation::Or => todo!(),
+                            Operation::OrNot => todo!(),
+                            Operation::Subtract => todo!(),
+                            Operation::Add => todo!(),
+                            Operation::Multiply => todo!(),
+                            Operation::Divide => todo!(),
+                            Operation::ReadBlackboard(_) => todo!(),
+                            Operation::WriteBlackboard(_) => todo!(),
+                            Operation::PlanTask(_) => todo!(),
+                            Operation::CallOperator(_, _) => todo!(),
+                        },
+                        Inertia::Depends(_,_)=>todo!(),
+                        Inertia::Fluent => todo!(),
+                        Inertia::Some => todo!(),
+                        Inertia::None => todo!(),
+                    }
+                } else {
+                    todo!("Reason about adding variable to something.")
+                }
+            },
             Operation::Multiply => todo!(),
             Operation::Divide => todo!(),
             Operation::ReadBlackboard(_) => todo!(),
@@ -328,7 +368,7 @@ pub fn build_wants(preconditions:&Vec<Operation>) -> Result<HashMap<usize, Inert
                 Inertia::Depends(..) => {inertias.push(last.clone()); inertias.push(last);},
                 _ => return Err(Error{message:format!("'or' can never result in {:?}", last)}),
             }},
-            Equals | Greater | Smaller => inertias.push(Inertia::Depends(*op, None)),
+            Equals | Greater | Smaller | GreaterOrEquals | SmallerOrEquals => inertias.push(Inertia::Depends(*op, None)),
             Push(literal) => { 
                 //if 
                 let last_want = inertias.pop().unwrap();

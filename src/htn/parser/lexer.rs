@@ -155,7 +155,10 @@ impl<'a> Lexer<'a> {
         let c = self.it.next();
         match c {
             Some((_, '\n')) => {self.col = 1; self.line += 1; self.is_newline = true; self.next_char()},
-            Some((_, '#')) => {while let Some(_) = self.it.next_if(|(_,c)| *c != '\n') {}; self.next_char()},
+            Some((_, '#')) => {
+                while let Some(_) = self.it.next_if(|(_,c)| *c != '\n') {};                     
+                self.next_char()
+            },
             _ => c,
         }
     }
