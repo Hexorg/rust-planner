@@ -2,8 +2,8 @@ use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Literal<'a> {
-    I(i32),
-    F(f32),
+    I(i64),
+    F(f64),
     B(bool),
     S(&'a str)
 }
@@ -35,33 +35,16 @@ pub struct Span {
     pub line: usize,
     pub col: usize,
     pub len: usize,
-    pub is_EOF: bool,
 }
 
 impl Span {
     pub fn new(line: usize, col: usize, len:usize) -> Self {
-        Self{line, col, len, is_EOF:false}
-    }
-    pub fn eof() -> Self {
-        Self{line:0, col:0, len:0, is_EOF:true}
+        Self{line, col, len}
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum TokenKind<'a> {
-    Task,
-    When,
-    Do,
-    Else,
-    On,
-    Def,
-    Cost,
-    Ordered,
-    Identifier(&'a str),
-    Literal(Literal<'a>),
-    Include,
-    Pass,
-    Equals,
+pub enum BinOpToken {
     EqualsEquals,
     Minus,
     Plus,
@@ -78,7 +61,47 @@ pub enum TokenKind<'a> {
     DivideBy,
     Or,
     And,
-    ExclamationPoint,
+    Not,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum KeywordToken {
+    Define,
+    Domain,
+    Problem,
+    Requirements,
+    Types,
+    Predicates,
+    Action,
+    Strips,
+    Typing,
+    NegativePreconditions,
+    DisjunctivePreconditions,
+    Equality,
+    ExistentialPreconditions,
+    UniversalPreconditions,
+    QuantifiedPreconditions,
+    ConditionalEffects,
+    Fluents,
+    ADL,
+    DurativeActions,
+    DerivedPredicates,
+    TimedInitialLiterals,
+    Preferences,
+    Constraints,
+    Parameters,
+    Precondition,
+    Effect
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TokenKind<'a> {
+    Identifier(&'a str),
+    Literal(Literal<'a>),
+    BinOp(BinOpToken),
+    Keyword(KeywordToken),
+    Equals,
+    QuestionMark,
     OpenParenthesis,
     CloseParenthesis,
     Colon,
