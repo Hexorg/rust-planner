@@ -6,13 +6,13 @@ use std::fmt;
 
 use tokens::Span;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 pub enum Position {
     Span(Span),
     EOF
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub struct Error {
     pub pos: Position,
     pub message: String,

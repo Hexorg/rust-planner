@@ -59,21 +59,55 @@ impl<'a> Parser<'a> {
     }
 
     fn problem(&mut self) -> Result<Stmt<'a>, Error> {
-        use TokenKind::*;
-        let name = expect!(self.lexer.next(), {Some(Ok(Token{kind:Identifier(s),..})) => Ok(s)}, "Expected problem name.")?;
+        use TokenKind::{Keyword, Colon, Identifier, OpenParenthesis, CloseParenthesis};
+        use KeywordToken::*;
+        let name = expect!(self.lexer.next(), {Some(Ok(Token{kind:Identifier(s),..})) => Ok(s)}, "Expected domain name.")?;
         expect!(self.lexer.next(), {Some(Ok(Token{kind:CloseParenthesis,..})) => Ok(())}, EXPECTED_CLOSE_PARENTHESIS)?;
-        todo!()
+        let mut domain = None;
+        let mut requirements = EnumSet::empty();
+        let mut objects = Vec::new();
+        let mut init = None;
+        let mut goal = None;
+        while self.lexer.next_if(|r| matches!(r, Ok(Token{kind:OpenParenthesis,..}))).is_some() {
+            expect!(self.lexer.next(), {Some(Ok(Token{kind:Colon,..})) => Ok(())}, EXPECTED_COLON)?;
+            expect!(self.lexer.next(), {
+                Some(Ok(Token{kind:Keyword(Domain),..})) => Ok(domain = Some(expect!(self.lexer.next(), {Some(Ok(Token{kind:Identifier(s),..}))=>Ok(s)}, EXPECTED_IDENTIFIER)?)),
+                Some(Ok(Token{kind:Keyword(Requirements),..})) => Ok(requirements = self.requirements()?),
+                Some(Ok(Token{kind:Keyword(Objects),..})) => Ok(objects = self.types()?),
+                Some(Ok(Token{kind:Keyword(Init),..})) => Ok(init = Some(self.and()?)), // force it to use a vector of Expressions
+                Some(Ok(Token{kind:Keyword(Goal),..})) => Ok(goal = Some(self.expr()?)),
+            }, "Expected :domain, :requirements, :objects.")?;
+            expect!(self.lexer.next(), {Some(Ok(Token{kind:CloseParenthesis,..})) => Ok(())}, EXPECTED_CLOSE_PARENTHESIS)?;
+        }
+        let domain = domain.unwrap();
+        let init = init.unwrap();
+        let goal = goal.unwrap();
+        Ok(Stmt::Problem(ast::Problem{name, domain, requirements, objects, init, goal}))
     }
 
     fn literal(&mut self, name:&'a str) -> Result<ast::Expr<'a>, Error> {
         use TokenKind::{Identifier, QuestionMark};
         let mut variables = Vec::new();
-        while self.lexer.next_if(|t| matches!(t, Ok(Token{kind:QuestionMark,..}))).is_some() {
-            variables.push(expect!(self.lexer.next(), {
-                Some(Ok(Token{kind:Identifier(s),..})) => Ok(s)
-            }, EXPECTED_IDENTIFIER)?)
+        const EXPECTED_VARIABLE: &str = "Expected variable.";
+        match self.lexer.peek() {
+            Some(Ok(Token{kind:QuestionMark,..})) => {
+                while self.lexer.next_if(|t| matches!(t, Ok(Token{kind:QuestionMark,..}))).is_some() {
+                    variables.push(expect!(self.lexer.next(), {
+                        Some(Ok(Token{kind:Identifier(s),..})) => Ok(s)
+                    }, EXPECTED_IDENTIFIER)?)
+                }
+                Ok(ast::Expr::Literal { name, variables })
+            },
+            Some(Ok(Token{kind:Identifier(_),..})) => {
+                while let Some(Ok(Token{kind:Identifier(s),..})) = self.lexer.next_if(|t| matches!(t, Ok(Token{kind:Identifier(_),..}))) {
+                    variables.push(s);
+                }
+                Ok(ast::Expr::Literal { name, variables })
+            },
+            Some(Ok(Token{span,kind})) => Err(Error { pos: Position::Span(*span), message:format!("{} got {:?}", EXPECTED_VARIABLE, kind) }),
+            Some(Err(e)) => Err(e.clone()),
+            None => Err(Error { pos: Position::EOF, message:String::from(EXPECTED_VARIABLE) })
         }
-        Ok(ast::Expr::Literal { name, variables })
     }
 
     fn not(&mut self) -> Result<ast::Expr<'a>, Error> {
@@ -124,7 +158,6 @@ impl<'a> Parser<'a> {
         if self.lexer.next_if(|t| matches!(t, Ok(Token{kind:Keyword(Effect),..}))).is_some() {
             effect = Some(self.expr()?);
         }
-        expect!(self.lexer.next(), {Some(Ok(Token{kind:CloseParenthesis,..})) => Ok(())}, EXPECTED_CLOSE_PARENTHESIS)?;
         Ok(ast::Action{name, parameters, precondition, effect})
     }
 
@@ -140,7 +173,6 @@ impl<'a> Parser<'a> {
             predicates.push(ast::Predicate{name, variables});
             expect!(self.lexer.next(), {Some(Ok(Token{kind:CloseParenthesis,..}))=>Ok(())}, EXPECTED_CLOSE_PARENTHESIS)?;
         }
-        expect!(self.lexer.next(), {Some(Ok(Token{kind:CloseParenthesis,..}))=>Ok(())}, EXPECTED_CLOSE_PARENTHESIS)?;
         Ok(predicates)
     }
 
@@ -174,7 +206,6 @@ impl<'a> Parser<'a> {
         while let Some(Ok(Token{kind:Identifier(_),..})) = self.lexer.peek() {
             types.push(self.typed_list_name()?);
         }
-        expect!(self.lexer.next(), {Some(Ok(Token{kind:CloseParenthesis,..}))=>Ok(())}, EXPECTED_CLOSE_PARENTHESIS)?;
         Ok(types)
     }
 
@@ -202,7 +233,6 @@ impl<'a> Parser<'a> {
                 Some(Ok(Token{kind:Keyword(Constraints),..})) => Ok(r.insert(ast::Requirements::Constraints)),
             }, "Expected requirements.")?;
         }
-        expect!(self.lexer.next(), {Some(Ok(Token{kind:CloseParenthesis,..}))=>Ok(())}, EXPECTED_CLOSE_PARENTHESIS)?;
         Ok(r)
     }
 
@@ -223,6 +253,7 @@ impl<'a> Parser<'a> {
                 Some(Ok(Token{kind:Keyword(Predicates),..})) => Ok(predicates = self.predicates()?),
                 Some(Ok(Token{kind:Keyword(Action),..})) => Ok(actions.push(self.action()?)),
             }, "Expected :requirements, :types, :predicates, or :action.")?;
+            expect!(self.lexer.next(), {Some(Ok(Token{kind:CloseParenthesis,..})) => Ok(())}, EXPECTED_CLOSE_PARENTHESIS)?;
         }
         Ok(Stmt::Domain(ast::Domain{name, requirements, types, predicates, actions}))
     }
@@ -254,7 +285,7 @@ mod tests {
 
     // use crate::htn::parser::{Parser, Error, statement::{Stmt, StmtKind, Block}, expression::{Expr, ExprKind}, tokens::{Span, Literal::*}};
     use super::Parser;
-    use super::ast::{Stmt, Domain, Requirements, TypedList, Predicate, Action, Expr};
+    use super::ast::{Stmt, Domain, Problem, Requirements, TypedList, Predicate, Action, Expr};
     #[test]
     fn test_domain() {
         let code = "(define (domain test) (:requirements :strips :typing) (:types hand - object water - beverage) (:predicates (warm ?o - object)) (:action test :parameters (?h - hand ?b - beverage) :precondition (cold ?h) :effect (warm ?b)))";
@@ -273,6 +304,20 @@ mod tests {
             }]
         }))));
         assert_eq!(parser.next(), None);
+    }
+
+    #[test]
+    fn test_problem() {
+        let code = "(define (problem test) (:domain barman) (:objects shaker1 - shaker) (:init (ontable shaker1)) (:goal (and (contains shot1 cocktail1))))";
+        let mut parser = Parser::new(code);
+        assert_eq!(parser.next(), Some(Ok(Stmt::Problem(Problem{
+            name:"test",
+            domain:"barman",
+            requirements: EnumSet::empty(),
+            objects:vec![TypedList{identifiers:vec!["shaker1"], name:"shaker"}],
+            init: Expr::And(vec![Expr::Literal { name: "ontable", variables: vec!["shaker1"] }]),
+            goal: Expr::And(vec![Expr::Literal { name: "contains", variables: vec!["shot1", "cocktail1"] }])
+        }))))
     }
     
 }

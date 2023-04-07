@@ -10,13 +10,13 @@ pub enum Stmt<'a> {
 pub struct Problem<'a> {
     pub name: &'a str,
     pub domain: &'a str,
-    pub requires: EnumSet<Requirements>,
-    pub objects: Vec<&'a str>,
-    pub init: &'a Stmt<'a>,
-    pub goal: &'a Stmt<'a>,
-    pub constraints: &'a str,
-    pub metric: &'a str,
-    pub length: &'a str
+    pub requirements: EnumSet<Requirements>,
+    pub objects: Vec<TypedList<'a>>,
+    pub init: Expr<'a>,
+    pub goal: Expr<'a>,
+    // pub constraints: &'a str,
+    // pub metric: &'a str,
+    // pub length: &'a str
 }
 
 #[derive(PartialEq, Debug)]
