@@ -1,5 +1,6 @@
 
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::process::id;
 
 use super::super::parser::pddl::ast::{self, TypedList, Predicate};
@@ -8,7 +9,8 @@ struct Compiler<'a> {
     domain:ast::Domain<'a>, 
     problem:ast::Problem<'a>,
     /// Map of object name or child type to the index of domain.types it's defined on.
-    types: HashMap<&'a str, usize>
+    types: HashMap<&'a str, usize>,
+    predicate_offset: HashMap<&'a str, usize>,
 }
 
 impl<'a> Compiler<'a> {
@@ -53,10 +55,18 @@ impl<'a> Compiler<'a> {
 
     fn build_state_space(&mut self) {
         let mut total_bits = 0;
+        fn binom(n:usize,k:usize)->usize {
+            let mut res = 1;
+            for i in 0..k {
+                res = (res * (n-i))/(i+1);
+            }
+            res
+        }
         for Predicate { name, variables } in &self.domain.predicates {
+            self.predicate_offset.insert(*name, total_bits);
             let mut predicate_bits = 1;
             for TypedList { identifiers, kind } in variables {
-                predicate_bits *= self.object_count(kind);
+                predicate_bits *= binom(self.object_count(kind), identifiers.len());
             }
             total_bits += predicate_bits;
             println!("Predicate {} is represented with {} bits.", name, predicate_bits);
@@ -66,7 +76,8 @@ impl<'a> Compiler<'a> {
 
     pub fn new(domain:ast::Domain<'a>, problem:ast::Problem<'a>) -> Self {
         let types = HashMap::new();
-        let mut r = Self {domain, problem, types};
+        let predicate_offset = HashMap::new();
+        let mut r = Self {domain, problem, types, predicate_offset};
         r.build_type_map();
         r.build_state_space();
         r
