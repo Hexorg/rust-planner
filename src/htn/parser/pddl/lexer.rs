@@ -146,12 +146,13 @@ impl<'a> Lexer<'a> {
 
     fn identifier(&mut self, offset:usize) -> Result<Token<'a>, Error> {
         let mut len = 1;
-        while let Some(_) = self.it.next_if(|(_,c)| (c.is_alphanumeric() || *c == '_')) { len += 1; }
+        while let Some(_) = self.it.next_if(|(_,c)| (c.is_alphanumeric() || *c == '_' || *c == '-')) { len += 1; }
         let slice = if let Some((identifier_end,_)) = self.it.peek() { &self.text[offset..*identifier_end]} else { &self.text[offset..]};
         let token = match slice {
             "define" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(Define)}),
             "domain" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(Domain)}),
             "problem" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(Problem)}),
+            "not" => Ok(Token{span:Span::new(self.line, self.col, len), kind:BinOp(Not)}),
             "requirements" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(Requirements)}),
             "types" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(Types)}),
             "objects" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(Objects)}),
@@ -164,6 +165,7 @@ impl<'a> Lexer<'a> {
             "typing" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(Typing)}),
             "negative-preconditions" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(NegativePreconditions)}),
             "disjunctive-preconditions" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(DisjunctivePreconditions)}),
+            "action-costs" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(ActionCosts)}),
             "equality" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(Equality)}),
             "existential-preconditions" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(ExistentialPreconditions)}),
             "universal-preconditions" => Ok(Token{span:Span::new(self.line, self.col, len), kind:Keyword(UniversalPreconditions)}),
@@ -187,8 +189,6 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::htn::parser::Error;
-
     use super::{Lexer, Token, Span, TokenKind::*, BinOpToken::*};
     #[test]
     fn test_include() {

@@ -6,6 +6,22 @@ pub enum Stmt<'a> {
     Problem(Problem<'a>)
 }
 
+impl<'a> Stmt<'a> {
+    pub fn unwrap_domain(self) -> Domain<'a> {
+        match self {
+            Self::Domain(d) => d,
+            _ => panic!(),
+        }
+    }
+
+    pub fn unwrap_problem(self) -> Problem<'a> {
+        match self {
+            Self::Problem(p) => p,
+            _ => panic!(),
+        }
+    }
+}
+
 #[derive(PartialEq, Debug)]
 pub struct Problem<'a> {
     pub name: &'a str,
@@ -36,6 +52,7 @@ pub enum Requirements {
     Strips,
     Typing,
     NegativePreconditions,
+    ActionCosts,
     DisjunctivePreconditions,
     Equality,
     ExistentialPreconditions,
@@ -75,5 +92,5 @@ pub struct Predicate<'a> {
 #[derive(PartialEq, Debug)]
 pub struct TypedList<'a> {
     pub identifiers: Vec<&'a str>,
-    pub name: &'a str,
+    pub kind: &'a str,
 }

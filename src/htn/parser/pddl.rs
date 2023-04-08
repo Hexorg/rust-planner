@@ -42,7 +42,7 @@ const EXPECTED_CLOSE_PARENTHESIS: &str = "Expected matched ')'.";
 
 #[macro_export]
 macro_rules! expect {
-    ($input:expr, {$($p:pat => $b:expr$(,)*)+}, $err:expr) => {
+    ($input:expr, {$($p:pat => $b:expr$(,)?)+}, $err:expr) => {
         match $input {
             $($p => $b,)+
             Some(Ok(Token{span,..})) => Err(Error { pos: Position::Span(span), message:String::from($err) }),
@@ -184,8 +184,8 @@ impl<'a> Parser<'a> {
             identifiers.push(expect!(self.lexer.next(), {Some(Ok(Token{kind:Identifier(s),..})) => Ok(s)}, EXPECTED_IDENTIFIER)?);
         }
         expect!(self.lexer.next(), {Some(Ok(Token{kind:BinOp(Minus),..})) => Ok(())}, "Expected '-' at the end of typed list.")?;
-        let name = expect!(self.lexer.next(), {Some(Ok(Token{kind:Identifier(s),..})) => Ok(s)}, EXPECTED_IDENTIFIER)?;
-        Ok(TypedList{identifiers, name})
+        let kind = expect!(self.lexer.next(), {Some(Ok(Token{kind:Identifier(s),..})) => Ok(s)}, EXPECTED_IDENTIFIER)?;
+        Ok(TypedList{identifiers, kind})
     }
 
     fn typed_list_name(&mut self) -> Result<TypedList<'a>, Error> {
@@ -196,8 +196,8 @@ impl<'a> Parser<'a> {
             identifiers.push(s);
         }
         expect!(self.lexer.next(), {Some(Ok(Token{kind:BinOp(Minus),..})) => Ok(())}, "Expected '-' at the end of typed list.")?;
-        let name = expect!(self.lexer.next(), {Some(Ok(Token{kind:Identifier(s),..})) => Ok(s)}, EXPECTED_IDENTIFIER)?;
-        Ok(TypedList{identifiers, name})
+        let kind = expect!(self.lexer.next(), {Some(Ok(Token{kind:Identifier(s),..})) => Ok(s)}, EXPECTED_IDENTIFIER)?;
+        Ok(TypedList{identifiers, kind})
     }
 
     fn types(&mut self) -> Result<Vec<TypedList<'a>>, Error> {
@@ -210,13 +210,14 @@ impl<'a> Parser<'a> {
     }
 
     fn requirements(&mut self) -> Result<EnumSet<ast::Requirements>, Error> {
-        use TokenKind::{Keyword, Colon, CloseParenthesis};
+        use TokenKind::{Keyword, Colon};
         use KeywordToken::*;
         let mut r = EnumSet::empty();
         while self.lexer.next_if(|t| matches!(t, Ok(Token{kind:Colon,..}))).is_some() {
             expect!(self.lexer.next(), {
                 Some(Ok(Token{kind:Keyword(Strips),..})) => Ok(r.insert(ast::Requirements::Strips)),
                 Some(Ok(Token{kind:Keyword(Typing),..})) => Ok(r.insert(ast::Requirements::Typing)),
+                Some(Ok(Token{kind:Keyword(ActionCosts),..})) => Ok(r.insert(ast::Requirements::ActionCosts)),
                 Some(Ok(Token{kind:Keyword(NegativePreconditions),..})) => Ok(r.insert(ast::Requirements::NegativePreconditions)),
                 Some(Ok(Token{kind:Keyword(DisjunctivePreconditions),..})) => Ok(r.insert(ast::Requirements::DisjunctivePreconditions)),
                 Some(Ok(Token{kind:Keyword(Equality),..})) => Ok(r.insert(ast::Requirements::Equality)),
@@ -293,12 +294,12 @@ mod tests {
         assert_eq!(parser.next(), Some(Ok(Stmt::Domain(Domain{
             name:"test", 
             requirements:enum_set!(Requirements::Strips | Requirements::Typing), 
-            types:vec![TypedList{identifiers:vec!["hand"], name:"object"},
-                       TypedList{identifiers:vec!["water"], name:"beverage"}], 
-            predicates:vec![Predicate{name:"warm", variables:vec![TypedList{identifiers:vec!["o"], name:"object"}]}], 
+            types:vec![TypedList{identifiers:vec!["hand"], kind:"object"},
+                       TypedList{identifiers:vec!["water"], kind:"beverage"}], 
+            predicates:vec![Predicate{name:"warm", variables:vec![TypedList{identifiers:vec!["o"], kind:"object"}]}], 
             actions:vec![Action{
                 name:"test", 
-                parameters:vec![TypedList{identifiers:vec!["h"], name:"hand"}, TypedList{identifiers:vec!["b"], name:"beverage"}],
+                parameters:vec![TypedList{identifiers:vec!["h"], kind:"hand"}, TypedList{identifiers:vec!["b"], kind:"beverage"}],
                 precondition:Some(Expr::Literal { name: "cold", variables: vec!["h"] }),
                 effect:Some(Expr::Literal { name: "warm", variables: vec!["b"] })
             }]
@@ -314,7 +315,7 @@ mod tests {
             name:"test",
             domain:"barman",
             requirements: EnumSet::empty(),
-            objects:vec![TypedList{identifiers:vec!["shaker1"], name:"shaker"}],
+            objects:vec![TypedList{identifiers:vec!["shaker1"], kind:"shaker"}],
             init: Expr::And(vec![Expr::Literal { name: "ontable", variables: vec!["shaker1"] }]),
             goal: Expr::And(vec![Expr::Literal { name: "contains", variables: vec!["shot1", "cocktail1"] }])
         }))))

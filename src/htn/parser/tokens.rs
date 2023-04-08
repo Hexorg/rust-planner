@@ -82,6 +82,7 @@ pub enum KeywordToken {
     DisjunctivePreconditions,
     Equality,
     ExistentialPreconditions,
+    ActionCosts,
     UniversalPreconditions,
     QuantifiedPreconditions,
     ConditionalEffects,
@@ -136,4 +137,7 @@ impl<'a> Token<'a> {
         }
     }
 
+    pub fn to_error(self, message:&str) -> super::Error {
+        super::Error { pos: super::Position::Span(self.span), message:String::from(message) }
+    }
 }
